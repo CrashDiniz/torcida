@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+*.sqlite3
+.keys/
+*.wallet.json
+node_modules/
+.pytest_cache/

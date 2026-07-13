@@ -1,0 +1,10 @@
+aiogram==3.29.1
+edge-tts==7.2.8
+fastapi==0.139.0
+httpx==0.28.1
+httpx-sse==0.4.3
+openai==2.45.0
+pydantic==2.13.4
+pytest==9.1.1
+python-dotenv==1.2.2
+uvicorn==0.51.0
