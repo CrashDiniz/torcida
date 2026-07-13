@@ -43,6 +43,13 @@ def test_pool_by_chat_restores_binding(tmp_path):
     assert found is not None and found.id == new.id  # latest wins
     assert store.pool_by_chat(-999) is None
 
+    # rebinding unbinds older pools: no duplicate group announcements
+    store.place_pick(Pick(id="", pool_id=old.id, user_id=1, fixture_id=900,
+                          market="1x2", selection="1", odds_decimal=2.0))
+    store.place_pick(Pick(id="", pool_id=new.id, user_id=1, fixture_id=900,
+                          market="1x2", selection="X", odds_decimal=3.0))
+    assert store.chats_for_fixture(900) == [(new.id, -100)]
+
 
 def test_pools_for_user_and_picks_for_user(tmp_path):
     store = make_store(tmp_path)

@@ -106,7 +106,11 @@ class Store:
         return self._pool(row) if row else None
 
     def bind_chat(self, pool_id: str, chat_id: int) -> None:
+        """Make pool the chat's single active pool: older pools lose the chat
+        binding (they keep settling, but stop receiving group announcements)."""
         with self._conn() as c:
+            c.execute("UPDATE pools SET telegram_chat_id=NULL "
+                      "WHERE telegram_chat_id=? AND id<>?", (chat_id, pool_id))
             c.execute("UPDATE pools SET telegram_chat_id=? WHERE id=?",
                       (chat_id, pool_id))
 

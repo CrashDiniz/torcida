@@ -57,6 +57,14 @@ _chat_pools: dict[int, str] = {}
 _pending_new: dict[int, tuple[int, str]] = {}
 
 SELECTION_LABELS = {"1": "casa", "X": "empate", "2": "visitante"}
+
+
+async def _answer(callback: CallbackQuery, text: str, **kwargs) -> None:
+    """callback.answer that tolerates expired queries (queued during downtime)."""
+    try:
+        await callback.answer(text, **kwargs)
+    except Exception:
+        log.info("stale callback answer dropped: %s", text)
 STATUS_EMOJI = {PickStatus.OPEN: "⏳", PickStatus.WON: "✅",
                 PickStatus.LOST: "❌", PickStatus.VOID: "⚪"}
 
@@ -180,20 +188,20 @@ async def new_pool(message: Message, command: CommandObject) -> None:
 async def confirm_new_pool(callback: CallbackQuery) -> None:
     pending = _pending_new.get(callback.message.chat.id)
     if pending is None:
-        await callback.answer("Esse pedido expirou — manda /novo de novo.")
+        await _answer(callback, "Esse pedido expirou — manda /novo de novo.")
         return
     requester_id, name = pending
     if callback.from_user.id != requester_id:
-        await callback.answer("Só quem pediu o /novo decide 😉")
+        await _answer(callback, "Só quem pediu o /novo decide 😉")
         return
     _pending_new.pop(callback.message.chat.id, None)
     await callback.message.edit_reply_markup(reply_markup=None)
     if callback.data.endswith(":no"):
-        await callback.answer("Beleza, bolão atual mantido.")
+        await _answer(callback, "Beleza, bolão atual mantido.")
         return
     await _create_pool(callback.message, name, requester_id,
                        callback.from_user.first_name or str(requester_id))
-    await callback.answer()
+    await _answer(callback, "")
 
 
 @router.callback_query(F.data.startswith("payout:"))
@@ -201,14 +209,14 @@ async def choose_payout(callback: CallbackQuery) -> None:
     _, pool_id, preset_value = callback.data.split(":")
     pool = store.pool_by_id(pool_id)
     if pool is None or callback.from_user.id != pool.creator_id:
-        await callback.answer("Só quem criou o bolão escolhe a premiação 😉")
+        await _answer(callback, "Só quem criou o bolão escolhe a premiação 😉")
         return
     preset = PayoutPreset(preset_value)
     with store._conn() as c:  # MVP: direct update
         c.execute("UPDATE pools SET payout_preset=? WHERE id=?", (preset.value, pool_id))
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer(f"Premiação definida: {PAYOUT_LABELS[preset]} ✅")
-    await callback.answer()
+    await _answer(callback, "")
 
 
 @router.message(Command("jogos"))
@@ -264,29 +272,35 @@ async def place_pick(callback: CallbackQuery) -> None:
     user = callback.from_user
     odds = float(odds_str)
     label = SELECTION_LABELS[selection]
+    active = _pool_for_chat(callback.message.chat.id)
+    if active is not None and active.id != pool_id:
+        await _answer(callback,
+                      "♻️ Esse card é de um bolão antigo — manda /jogos "
+                      "pra palpitar no atual!", show_alert=True)
+        return
     if _fixture_started(int(fixture_id)):
-        await callback.answer("⛔ Bola rolando — palpites travados pra esse jogo!",
-                              show_alert=True)
+        await _answer(callback, "⛔ Bola rolando — palpites travados pra esse jogo!",
+                      show_alert=True)
         return
     store.join(pool_id, user.id, user.first_name or str(user.id))
     existing = store.pick_for(pool_id, user.id, int(fixture_id))
     if existing is not None:
         if existing.selection == selection:
-            await callback.answer(
-                f"Você já palpitou {label} @ {existing.odds_decimal:.2f} 😉")
+            await _answer(callback,
+                          f"Você já palpitou {label} @ {existing.odds_decimal:.2f} 😉")
             return
         store.replace_pick(existing.id, selection, odds, time.time())
-        await callback.answer(
-            f"Palpite trocado: {SELECTION_LABELS[existing.selection]} ➜ {label} "
-            f"@ {odds:.2f} (vale {points_for(odds)} pts) 🔁")
+        await _answer(callback,
+                      f"Palpite trocado: {SELECTION_LABELS[existing.selection]} ➜ {label} "
+                      f"@ {odds:.2f} (vale {points_for(odds)} pts) 🔁")
         return
     pick = Pick(id=uuid.uuid4().hex, pool_id=pool_id, user_id=user.id,
                 fixture_id=int(fixture_id), market="1x2",
                 selection=selection, odds_decimal=odds)
     store.place_pick(pick)
-    await callback.answer(
-        f"Palpite registrado: {label} @ {odds:.2f} "
-        f"(vale {points_for(odds)} pts) 🎯", show_alert=False)
+    await _answer(callback,
+                  f"Palpite registrado: {label} @ {odds:.2f} "
+                  f"(vale {points_for(odds)} pts) 🎯", show_alert=False)
 
 
 async def _pick_lines(picks: list[Pick]) -> list[str]:
