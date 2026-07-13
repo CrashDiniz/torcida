@@ -106,7 +106,7 @@ async def start_deeplink(message: Message, command: CommandObject) -> None:
         # pool's persistent group binding (used for goal/final announcements)
         _chat_pools[message.chat.id] = pool.id
         await message.answer(
-            f"🎉 <b>{html.escape(user.first_name or 'Você')}</b> entrou no bolão "
+            f"🎉 <b>{html.escape(user.first_name or 'Você')}</b> entrou em "
             f"<b>{html.escape(pool.name)}</b>!\n"
             f"Premiação: {PAYOUT_LABELS[pool.payout_preset]}\n\n"
             f"Use /jogos para palpitar e /placar para ver a classificação.",
@@ -144,7 +144,7 @@ async def _create_pool(message: Message, name: str,
         InlineKeyboardButton(text=label, callback_data=f"payout:{pool.id}:{preset.value}")
     ] for preset, label in PAYOUT_LABELS.items()])
     await message.answer(
-        f"🏟 Bolão <b>{html.escape(pool.name)}</b> criado!\n\n"
+        f"🏟 <b>{html.escape(pool.name)}</b> criado!\n\n"
         f"Convite (manda pros amigos):\n{invite}\n\n"
         f"Escolhe a premiação:",
         parse_mode="HTML",
@@ -163,8 +163,9 @@ async def new_pool(message: Message, command: CommandObject) -> None:
             InlineKeyboardButton(text="❌ Manter atual", callback_data="newpool:no"),
         ]])
         await message.answer(
-            f"⚠️ Já existe o bolão <b>{html.escape(existing.name)}</b> ativo "
-            f"neste grupo. Criar <b>{html.escape(name)}</b> mesmo assim?\n"
+            f"⚠️ Este grupo já tem um bolão ativo: "
+            f"<b>{html.escape(existing.name)}</b>.\n"
+            f"Criar <b>{html.escape(name)}</b> mesmo assim?\n"
             f"<i>O grupo passa a usar o novo; o antigo continua valendo "
             f"pra quem já palpitou.</i>",
             parse_mode="HTML",
