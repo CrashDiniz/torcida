@@ -6,7 +6,11 @@ Flows:
   /novo <nome>          – create a pool in this chat (creator picks payout preset)
   /jogos                – list upcoming fixtures with pick buttons
   /placar               – live leaderboard of this chat's pool
+  /meus                 – my picks in this chat's pool
+  /boloes               – pools I participate in
 Inline buttons: pick 1/X/2 priced at current consensus odds.
+A background task consumes the TxLINE scores stream and announces goals and
+final results (with settled leaderboard) in every chat holding picks.
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import asyncio
 import html
 import logging
 import os
+import time
 import uuid
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -21,9 +26,10 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (CallbackQuery, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message)
 
-from ..engine.models import PayoutPreset, Pick, Pool
+from ..engine.models import PayoutPreset, Pick, PickStatus, Pool
 from ..engine.odds import parse_snapshot
 from ..engine.scoring import points_for
+from ..engine.settlement import FixtureState, SettlementService
 from ..engine.store import Store
 from ..ingest.txline import TxLineClient
 
@@ -41,15 +47,43 @@ PAYOUT_LABELS = {
 
 # chat_id -> pool_id (one active pool per group chat, MVP simplification)
 _chat_pools: dict[int, str] = {}
+# chat_id -> (requester_id, pool name) awaiting "create another pool?" confirmation
+_pending_new: dict[int, tuple[int, str]] = {}
+
+SELECTION_LABELS = {"1": "casa", "X": "empate", "2": "visitante"}
+STATUS_EMOJI = {PickStatus.OPEN: "⏳", PickStatus.WON: "✅",
+                PickStatus.LOST: "❌", PickStatus.VOID: "⚪"}
 
 
 def _pool_for_chat(chat_id: int) -> Pool | None:
     pool_id = _chat_pools.get(chat_id)
-    return store.pool_by_id(pool_id) if pool_id else None
+    if pool_id:
+        return store.pool_by_id(pool_id)
+    pool = store.pool_by_chat(chat_id)  # restore binding after restart
+    if pool is not None:
+        _chat_pools[chat_id] = pool.id
+    return pool
 
 
 def _register_chat_pool(chat_id: int, pool: Pool) -> None:
     _chat_pools[chat_id] = pool.id
+    store.bind_chat(pool.id, chat_id)
+
+
+async def _fixture_label(fixture_id: int) -> str:
+    label = store.fixture_label(fixture_id)
+    if label:
+        return label
+    try:
+        assert txline is not None
+        fx = await txline.fixtures(start_epoch_day=int(time.time() // 86400))
+        for f in fx:
+            if f.get("FixtureId") and f.get("Participant1"):
+                store.set_fixture_label(
+                    f["FixtureId"], f"{f['Participant1']} x {f['Participant2']}")
+    except Exception:
+        log.warning("fixture label lookup failed for %s", fixture_id, exc_info=True)
+    return store.fixture_label(fixture_id) or f"Jogo #{fixture_id}"
 
 
 @router.message(CommandStart(deep_link=True))
@@ -62,7 +96,9 @@ async def start_deeplink(message: Message, command: CommandObject) -> None:
             return
         user = message.from_user
         store.join(pool.id, user.id, user.first_name or user.username or str(user.id))
-        _register_chat_pool(message.chat.id, pool)
+        # memory-only: joins happen in the joiner's DM, which must not steal the
+        # pool's persistent group binding (used for goal/final announcements)
+        _chat_pools[message.chat.id] = pool.id
         await message.answer(
             f"🎉 <b>{html.escape(user.first_name or 'Você')}</b> entrou no bolão "
             f"<b>{html.escape(pool.name)}</b>!\n"
@@ -80,20 +116,20 @@ async def start(message: Message) -> None:
         "⚽ <b>Torcida</b> — bolão ao vivo com odds de verdade.\n\n"
         "• /novo <i>nome</i> — criar um bolão neste grupo\n"
         "• /jogos — palpitar nos próximos jogos\n"
-        "• /placar — classificação ao vivo\n\n"
+        "• /placar — classificação ao vivo\n"
+        "• /meus — seus palpites\n"
+        "• /boloes — seus bolões\n\n"
         "Palpites valem mais quando você acerta a zebra: os pontos são "
         "calculados pela odd de consenso no momento do palpite. 🦓",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("novo"))
-async def new_pool(message: Message, command: CommandObject) -> None:
-    name = (command.args or "").strip() or f"Bolão de {message.from_user.first_name}"
-    pool = Pool(id=uuid.uuid4().hex, name=name, creator_id=message.from_user.id)
+async def _create_pool(message: Message, name: str,
+                       creator_id: int, creator_name: str) -> None:
+    pool = Pool(id=uuid.uuid4().hex, name=name, creator_id=creator_id)
     store.create_pool(pool, telegram_chat_id=message.chat.id)
-    store.join(pool.id, message.from_user.id,
-               message.from_user.first_name or str(message.from_user.id))
+    store.join(pool.id, creator_id, creator_name)
     _register_chat_pool(message.chat.id, pool)
 
     me = await message.bot.get_me()
@@ -108,6 +144,49 @@ async def new_pool(message: Message, command: CommandObject) -> None:
         parse_mode="HTML",
         reply_markup=keyboard,
     )
+
+
+@router.message(Command("novo"))
+async def new_pool(message: Message, command: CommandObject) -> None:
+    name = (command.args or "").strip() or f"Bolão de {message.from_user.first_name}"
+    existing = _pool_for_chat(message.chat.id)
+    if existing is not None:
+        _pending_new[message.chat.id] = (message.from_user.id, name)
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Criar novo", callback_data="newpool:yes"),
+            InlineKeyboardButton(text="❌ Manter atual", callback_data="newpool:no"),
+        ]])
+        await message.answer(
+            f"⚠️ Já existe o bolão <b>{html.escape(existing.name)}</b> ativo "
+            f"neste grupo. Criar <b>{html.escape(name)}</b> mesmo assim?\n"
+            f"<i>O grupo passa a usar o novo; o antigo continua valendo "
+            f"pra quem já palpitou.</i>",
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        return
+    await _create_pool(message, name, message.from_user.id,
+                       message.from_user.first_name or str(message.from_user.id))
+
+
+@router.callback_query(F.data.startswith("newpool:"))
+async def confirm_new_pool(callback: CallbackQuery) -> None:
+    pending = _pending_new.get(callback.message.chat.id)
+    if pending is None:
+        await callback.answer("Esse pedido expirou — manda /novo de novo.")
+        return
+    requester_id, name = pending
+    if callback.from_user.id != requester_id:
+        await callback.answer("Só quem pediu o /novo decide 😉")
+        return
+    _pending_new.pop(callback.message.chat.id, None)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    if callback.data.endswith(":no"):
+        await callback.answer("Beleza, bolão atual mantido.")
+        return
+    await _create_pool(callback.message, name, requester_id,
+                       callback.from_user.first_name or str(requester_id))
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("payout:"))
@@ -142,6 +221,7 @@ async def fixtures(message: Message) -> None:
     for f in upcoming:
         odds = parse_snapshot(await txline.odds_snapshot(f["FixtureId"]))
         home, away = f.get("Participant1", "?"), f.get("Participant2", "?")
+        store.set_fixture_label(f["FixtureId"], f"{home} x {away}")
         if not odds.live:
             live_flag = " (odds de referência)"
         elif odds.period:
@@ -182,6 +262,53 @@ async def place_pick(callback: CallbackQuery) -> None:
         f"(vale {points_for(float(odds_str))} pts) 🎯", show_alert=False)
 
 
+@router.message(Command("meus"))
+async def my_picks(message: Message) -> None:
+    pool = _pool_for_chat(message.chat.id)
+    if pool is None:
+        await message.answer("Crie um bolão primeiro: /novo nome-do-bolão")
+        return
+    picks = store.picks_for_user(pool.id, message.from_user.id)
+    if not picks:
+        await message.answer("Você ainda não palpitou. Manda um /jogos! ⚽")
+        return
+    lines = []
+    for p in picks:
+        label = await _fixture_label(p.fixture_id)
+        pts = (f"+{p.points_awarded} pts" if p.status == PickStatus.WON
+               else f"vale {points_for(p.odds_decimal)} pts"
+               if p.status == PickStatus.OPEN else "0 pts")
+        lines.append(
+            f"{STATUS_EMOJI[p.status]} <b>{html.escape(label)}</b> — "
+            f"{SELECTION_LABELS.get(p.selection, p.selection)} "
+            f"@ {p.odds_decimal:.2f} · {pts}")
+    await message.answer(
+        f"🎯 Seus palpites em <b>{html.escape(pool.name)}</b>:\n\n"
+        + "\n".join(lines),
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("boloes"))
+async def my_pools(message: Message) -> None:
+    pools = store.pools_for_user(message.from_user.id)
+    if not pools:
+        await message.answer("Você não está em nenhum bolão. Crie um: /novo nome")
+        return
+    lines = []
+    for pool in pools:
+        rows = store.standings(pool.id)
+        pos = next((i + 1 for i, (uid, _, _) in enumerate(rows)
+                    if uid == message.from_user.id), None)
+        points = next((pts for uid, _, pts in rows
+                       if uid == message.from_user.id), 0)
+        rank = f"#{pos} de {len(rows)}" if pos else "—"
+        lines.append(f"• <b>{html.escape(pool.name)}</b> — "
+                     f"{points} pts ({rank})")
+    await message.answer("🏟 Seus bolões:\n\n" + "\n".join(lines),
+                         parse_mode="HTML")
+
+
 @router.message(Command("placar"))
 async def leaderboard(message: Message) -> None:
     pool = _pool_for_chat(message.chat.id)
@@ -204,6 +331,53 @@ async def leaderboard(message: Message) -> None:
     )
 
 
+async def _safe_send(bot: Bot, chat_id: int, text: str) -> None:
+    try:
+        await bot.send_message(chat_id, text, parse_mode="HTML")
+    except Exception:
+        log.warning("announce to chat %s failed", chat_id, exc_info=True)
+
+
+def _make_announcers(bot: Bot):
+    async def on_goal(state: FixtureState) -> None:
+        chats = store.chats_for_fixture(state.fixture_id)
+        if not chats:
+            return
+        label = await _fixture_label(state.fixture_id)
+        text = (f"⚽ <b>GOOOL!</b>\n{html.escape(label)}: "
+                f"<b>{state.home_goals} x {state.away_goals}</b>")
+        for _, chat_id in chats:
+            await _safe_send(bot, chat_id, text)
+
+    async def on_final(state: FixtureState, settled: int) -> None:
+        label = await _fixture_label(state.fixture_id)
+        medals = ["🥇", "🥈", "🥉"]
+        for pool_id, chat_id in store.chats_for_fixture(state.fixture_id):
+            pool = store.pool_by_id(pool_id)
+            rows = store.standings(pool_id)
+            board = "\n".join(
+                f"{medals[i] if i < 3 else f'{i + 1}.'} "
+                f"<b>{html.escape(name)}</b> — {points} pts"
+                for i, (_, name, points) in enumerate(rows))
+            await _safe_send(
+                bot, chat_id,
+                f"🏁 <b>Fim de jogo!</b>\n{html.escape(label)}: "
+                f"<b>{state.home_goals} x {state.away_goals}</b>\n\n"
+                f"Palpites liquidados. 📊 <b>{html.escape(pool.name)}</b>:\n"
+                f"{board}")
+
+    return on_goal, on_final
+
+
+async def _consume_scores(service: SettlementService) -> None:
+    assert txline is not None
+    async for event in txline.stream("scores"):
+        try:
+            await service.handle_event(event)
+        except Exception:
+            log.exception("settlement failed for event")
+
+
 async def main() -> None:
     global txline
     logging.basicConfig(level=logging.INFO)
@@ -213,8 +387,14 @@ async def main() -> None:
     bot = Bot(token=os.environ["TELEGRAM_BOT_TOKEN"])
     dp = Dispatcher()
     dp.include_router(router)
-    log.info("Torcida bot starting (polling)")
-    await dp.start_polling(bot)
+    on_goal, on_final = _make_announcers(bot)
+    service = SettlementService(store, on_goal=on_goal, on_final=on_final)
+    scores_task = asyncio.create_task(_consume_scores(service))
+    log.info("Torcida bot starting (polling + live settlement)")
+    try:
+        await dp.start_polling(bot)
+    finally:
+        scores_task.cancel()
 
 
 if __name__ == "__main__":

@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS picks (
 );
 CREATE INDEX IF NOT EXISTS idx_picks_fixture ON picks(fixture_id, status);
 CREATE INDEX IF NOT EXISTS idx_picks_pool ON picks(pool_id);
+CREATE TABLE IF NOT EXISTS fixture_labels (
+  fixture_id INTEGER PRIMARY KEY,
+  label TEXT NOT NULL
+);
 """
 
 
@@ -90,6 +94,41 @@ class Store:
         with self._conn() as c:
             row = c.execute("SELECT * FROM pools WHERE id=?", (pool_id,)).fetchone()
         return self._pool(row) if row else None
+
+    def pool_by_chat(self, chat_id: int) -> Pool | None:
+        """Latest pool bound to a telegram chat (survives bot restarts)."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM pools WHERE telegram_chat_id=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (chat_id,),
+            ).fetchone()
+        return self._pool(row) if row else None
+
+    def bind_chat(self, pool_id: str, chat_id: int) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE pools SET telegram_chat_id=? WHERE id=?",
+                      (chat_id, pool_id))
+
+    def pools_for_user(self, user_id: int) -> list[Pool]:
+        with self._conn() as c:
+            rows = c.execute(
+                """SELECT p.* FROM pools p JOIN entries e ON e.pool_id = p.id
+                   WHERE e.user_id=? ORDER BY p.created_at DESC""",
+                (user_id,),
+            ).fetchall()
+        return [self._pool(r) for r in rows]
+
+    def chats_for_fixture(self, fixture_id: int) -> list[tuple[str, int]]:
+        """[(pool_id, telegram_chat_id)] of pools holding picks on a fixture."""
+        with self._conn() as c:
+            rows = c.execute(
+                """SELECT DISTINCT p.pool_id, po.telegram_chat_id
+                   FROM picks p JOIN pools po ON po.id = p.pool_id
+                   WHERE p.fixture_id=? AND po.telegram_chat_id IS NOT NULL""",
+                (fixture_id,),
+            ).fetchall()
+        return [(r["pool_id"], r["telegram_chat_id"]) for r in rows]
 
     @staticmethod
     def _pool(row: sqlite3.Row) -> Pool:
@@ -141,6 +180,15 @@ class Store:
             )
         return pick
 
+    def picks_for_user(self, pool_id: str, user_id: int) -> list[Pick]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM picks WHERE pool_id=? AND user_id=? "
+                "ORDER BY placed_at",
+                (pool_id, user_id),
+            ).fetchall()
+        return [self._pick(r) for r in rows]
+
     def open_picks_for_fixture(self, fixture_id: int) -> list[Pick]:
         with self._conn() as c:
             rows = c.execute(
@@ -155,6 +203,21 @@ class Store:
                 "UPDATE picks SET status=?, points_awarded=? WHERE id=?",
                 (pick.status.value, pick.points_awarded, pick.id),
             )
+
+    # --- fixture labels --------------------------------------------------------
+
+    def set_fixture_label(self, fixture_id: int, label: str) -> None:
+        with self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO fixture_labels VALUES (?,?)",
+                      (fixture_id, label))
+
+    def fixture_label(self, fixture_id: int) -> str | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT label FROM fixture_labels WHERE fixture_id=?",
+                (fixture_id,),
+            ).fetchone()
+        return row["label"] if row else None
 
     @staticmethod
     def _pick(row: sqlite3.Row) -> Pick:
