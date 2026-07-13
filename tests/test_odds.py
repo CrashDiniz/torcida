@@ -1,5 +1,15 @@
 from src.engine.odds import FALLBACK, parse_snapshot
 
+# real devnet payload shape (captured 2026-07-13)
+REAL_ENTRY = {
+    "FixtureId": 18241006, "Ts": 1783925101470,
+    "Bookmaker": "TXLineStablePriceDemargined",
+    "SuperOddsType": "1X2_PARTICIPANT_RESULT",
+    "MarketPeriod": "half=1",
+    "PriceNames": ["part1", "draw", "part2"],
+    "Prices": [3634, 2085, 4078],
+}
+
 
 def test_empty_snapshot_falls_back():
     odds = parse_snapshot([])
@@ -7,31 +17,38 @@ def test_empty_snapshot_falls_back():
     assert odds.home == FALLBACK["1"]
 
 
-def test_parses_and_averages_prices():
-    snapshot = [
-        {"Market": "1X2", "Prices": [
-            {"label": "home", "price": 2.0},
-            {"label": "draw", "price": 3.0},
-            {"label": "away", "price": 4.0},
-        ]},
-        {"Market": "Full Time Result", "Prices": [
-            {"label": "1", "price": 2.2},
-            {"label": "X", "price": 3.4},
-            {"label": "2", "price": 3.6},
-        ]},
-    ]
-    odds = parse_snapshot(snapshot)
+def test_parses_real_devnet_payload():
+    odds = parse_snapshot([REAL_ENTRY])
     assert odds.live
-    assert odds.home == 2.1
-    assert odds.draw == 3.2
-    assert odds.away == 3.8
-    assert odds.for_selection("X") == 3.2
+    assert odds.home == 3.63
+    assert odds.draw == 2.08  # 2085/1000 -> 2.085 rounds down in float
+    assert odds.away == 4.08
+    assert odds.period == "half=1"
 
 
-def test_ignores_unrelated_markets_and_bad_prices():
-    snapshot = [
-        {"Market": "Total Goals Over/Under", "Prices": [{"label": "over", "price": 1.9}]},
-        {"Market": "1x2", "Prices": [{"label": "home", "price": "not-a-number"}]},
-    ]
+def test_prefers_full_time_over_half():
+    ft = dict(REAL_ENTRY, MarketPeriod="regulartime",
+              Prices=[1850, 3400, 4200], Ts=1)
+    odds = parse_snapshot([REAL_ENTRY, ft])
+    assert odds.home == 1.85 and odds.period == ""
+
+
+def test_prefers_latest_timestamp_within_period():
+    newer = dict(REAL_ENTRY, Ts=REAL_ENTRY["Ts"] + 1000, Prices=[3700, 2100, 4000])
+    odds = parse_snapshot([REAL_ENTRY, newer])
+    assert odds.home == 3.7
+
+
+def test_survives_garbage_entries():
+    snapshot = [42, "junk", None, {"SuperOddsType": "OTHER"},
+                {"SuperOddsType": "1X2_PARTICIPANT_RESULT", "PriceNames": ["part1"],
+                 "Prices": [2000]},
+                REAL_ENTRY]
     odds = parse_snapshot(snapshot)
-    assert not odds.live
+    assert odds.live and odds.home == 3.63
+
+
+def test_plain_float_prices_also_work():
+    entry = dict(REAL_ENTRY, Prices=[2.5, 3.1, 2.9])
+    odds = parse_snapshot([entry])
+    assert odds.live and odds.draw == 3.1

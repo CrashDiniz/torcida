@@ -142,7 +142,12 @@ async def fixtures(message: Message) -> None:
     for f in upcoming:
         odds = parse_snapshot(await txline.odds_snapshot(f["FixtureId"]))
         home, away = f.get("Participant1", "?"), f.get("Participant2", "?")
-        live_flag = "" if odds.live else " (odds de referência)"
+        if not odds.live:
+            live_flag = " (odds de referência)"
+        elif odds.period:
+            live_flag = f" (odds do {odds.period.replace('half=1', '1º tempo')})"
+        else:
+            live_flag = ""
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(
                 text=f"{home} · {odds.home:.2f}",
