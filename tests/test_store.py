@@ -75,6 +75,28 @@ def test_chats_for_fixture_only_bound_pools_with_picks(tmp_path):
     assert store.chats_for_fixture(555) == []
 
 
+def test_pick_for_and_replace(tmp_path):
+    store = make_store(tmp_path)
+    pool = store.create_pool(make_pool())
+    pick = store.place_pick(Pick(id="", pool_id=pool.id, user_id=42,
+                                 fixture_id=900, market="1x2",
+                                 selection="1", odds_decimal=2.0))
+    found = store.pick_for(pool.id, 42, 900)
+    assert found is not None and found.id == pick.id
+    assert store.pick_for(pool.id, 42, 901) is None
+    assert store.pick_for(pool.id, 7, 900) is None
+
+    store.replace_pick(pick.id, "X", 3.4, placed_at=pick.placed_at + 60)
+    updated = store.pick_for(pool.id, 42, 900)
+    assert updated is not None
+    assert (updated.selection, updated.odds_decimal) == ("X", 3.4)
+    assert len(store.picks_for_user(pool.id, 42)) == 1  # replaced, not added
+
+    from src.engine.scoring import settle_1x2
+    store.update_pick(settle_1x2(updated, home_goals=1, away_goals=1))
+    assert store.pick_for(pool.id, 42, 900) is None  # settled picks not replaceable
+
+
 def test_fixture_labels_roundtrip(tmp_path):
     store = make_store(tmp_path)
     assert store.fixture_label(900) is None

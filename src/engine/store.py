@@ -180,6 +180,25 @@ class Store:
             )
         return pick
 
+    def pick_for(self, pool_id: str, user_id: int, fixture_id: int,
+                 market: str = "1x2") -> Pick | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM picks WHERE pool_id=? AND user_id=? "
+                "AND fixture_id=? AND market=? AND status='open'",
+                (pool_id, user_id, fixture_id, market),
+            ).fetchone()
+        return self._pick(row) if row else None
+
+    def replace_pick(self, pick_id: str, selection: str, odds_decimal: float,
+                     placed_at: float) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE picks SET selection=?, odds_decimal=?, placed_at=? "
+                "WHERE id=? AND status='open'",
+                (selection, odds_decimal, placed_at, pick_id),
+            )
+
     def picks_for_user(self, pool_id: str, user_id: int) -> list[Pick]:
         with self._conn() as c:
             rows = c.execute(

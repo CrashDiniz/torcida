@@ -38,6 +38,12 @@ router = Router()
 
 store = Store()
 txline: TxLineClient | None = None
+settlement: SettlementService | None = None
+
+
+def _fixture_started(fixture_id: int) -> bool:
+    """True once the scores stream has produced any state for the fixture."""
+    return settlement is not None and fixture_id in settlement._states
 
 PAYOUT_LABELS = {
     PayoutPreset.WINNER_TAKES_ALL: "🥇 Vencedor leva tudo",
@@ -239,9 +245,13 @@ async def fixtures(message: Message) -> None:
                 text=f"{away} · {odds.away:.2f}",
                 callback_data=f"pick:{pool.id}:{f['FixtureId']}:2:{odds.away:.2f}"),
         ]])
+        mine = store.pick_for(pool.id, message.from_user.id, f["FixtureId"])
+        current = (f"\nSeu palpite: <b>{SELECTION_LABELS[mine.selection]} "
+                   f"@ {mine.odds_decimal:.2f}</b> (toque pra trocar)"
+                   if mine else "")
         await message.answer(
             f"⚽ <b>{html.escape(home)} x {html.escape(away)}</b>{live_flag}\n"
-            f"Acertou, leva <i>100 × odd</i> em pontos:",
+            f"Acertou, leva <i>100 × odd</i> em pontos:{current}",
             parse_mode="HTML",
             reply_markup=keyboard,
         )
@@ -251,27 +261,34 @@ async def fixtures(message: Message) -> None:
 async def place_pick(callback: CallbackQuery) -> None:
     _, pool_id, fixture_id, selection, odds_str = callback.data.split(":")
     user = callback.from_user
+    odds = float(odds_str)
+    label = SELECTION_LABELS[selection]
+    if _fixture_started(int(fixture_id)):
+        await callback.answer("⛔ Bola rolando — palpites travados pra esse jogo!",
+                              show_alert=True)
+        return
     store.join(pool_id, user.id, user.first_name or str(user.id))
+    existing = store.pick_for(pool_id, user.id, int(fixture_id))
+    if existing is not None:
+        if existing.selection == selection:
+            await callback.answer(
+                f"Você já palpitou {label} @ {existing.odds_decimal:.2f} 😉")
+            return
+        store.replace_pick(existing.id, selection, odds, time.time())
+        await callback.answer(
+            f"Palpite trocado: {SELECTION_LABELS[existing.selection]} ➜ {label} "
+            f"@ {odds:.2f} (vale {points_for(odds)} pts) 🔁")
+        return
     pick = Pick(id=uuid.uuid4().hex, pool_id=pool_id, user_id=user.id,
                 fixture_id=int(fixture_id), market="1x2",
-                selection=selection, odds_decimal=float(odds_str))
+                selection=selection, odds_decimal=odds)
     store.place_pick(pick)
-    label = {"1": "casa", "X": "empate", "2": "visitante"}[selection]
     await callback.answer(
-        f"Palpite registrado: {label} @ {float(odds_str):.2f} "
-        f"(vale {points_for(float(odds_str))} pts) 🎯", show_alert=False)
+        f"Palpite registrado: {label} @ {odds:.2f} "
+        f"(vale {points_for(odds)} pts) 🎯", show_alert=False)
 
 
-@router.message(Command("meus"))
-async def my_picks(message: Message) -> None:
-    pool = _pool_for_chat(message.chat.id)
-    if pool is None:
-        await message.answer("Crie um bolão primeiro: /novo nome-do-bolão")
-        return
-    picks = store.picks_for_user(pool.id, message.from_user.id)
-    if not picks:
-        await message.answer("Você ainda não palpitou. Manda um /jogos! ⚽")
-        return
+async def _pick_lines(picks: list[Pick]) -> list[str]:
     lines = []
     for p in picks:
         label = await _fixture_label(p.fixture_id)
@@ -282,6 +299,35 @@ async def my_picks(message: Message) -> None:
             f"{STATUS_EMOJI[p.status]} <b>{html.escape(label)}</b> — "
             f"{SELECTION_LABELS.get(p.selection, p.selection)} "
             f"@ {p.odds_decimal:.2f} · {pts}")
+    return lines
+
+
+@router.message(Command("meus"))
+async def my_picks(message: Message) -> None:
+    if message.chat.type == "private":
+        # DM: every pool the user is in, grouped
+        sections = []
+        for pool in store.pools_for_user(message.from_user.id):
+            picks = store.picks_for_user(pool.id, message.from_user.id)
+            if picks:
+                lines = await _pick_lines(picks)
+                sections.append(f"📌 <b>{html.escape(pool.name)}</b>\n"
+                                + "\n".join(lines))
+        if not sections:
+            await message.answer("Você ainda não palpitou em nenhum bolão. ⚽")
+            return
+        await message.answer("🎯 Seus palpites:\n\n" + "\n\n".join(sections),
+                             parse_mode="HTML")
+        return
+    pool = _pool_for_chat(message.chat.id)
+    if pool is None:
+        await message.answer("Crie um bolão primeiro: /novo nome-do-bolão")
+        return
+    picks = store.picks_for_user(pool.id, message.from_user.id)
+    if not picks:
+        await message.answer("Você ainda não palpitou. Manda um /jogos! ⚽")
+        return
+    lines = await _pick_lines(picks)
     await message.answer(
         f"🎯 Seus palpites em <b>{html.escape(pool.name)}</b>:\n\n"
         + "\n".join(lines),
@@ -378,18 +424,43 @@ async def _consume_scores(service: SettlementService) -> None:
             log.exception("settlement failed for event")
 
 
+async def _log_update(handler, event, data):
+    if getattr(event, "message", None) and event.message.text:
+        m = event.message
+        log.info("msg %s(%s) chat=%s: %s", m.from_user.first_name,
+                 m.from_user.id, m.chat.id, m.text)
+    elif getattr(event, "callback_query", None):
+        cq = event.callback_query
+        log.info("callback %s(%s): %s", cq.from_user.first_name,
+                 cq.from_user.id, cq.data)
+    return await handler(event, data)
+
+
+BOT_COMMANDS = [
+    ("novo", "criar um bolão neste grupo"),
+    ("jogos", "palpitar nos próximos jogos"),
+    ("placar", "classificação ao vivo do bolão"),
+    ("meus", "seus palpites"),
+    ("boloes", "seus bolões"),
+]
+
+
 async def main() -> None:
-    global txline
+    global txline, settlement
     logging.basicConfig(level=logging.INFO)
     from dotenv import load_dotenv
     load_dotenv(".env")
     txline = TxLineClient.from_env()
     bot = Bot(token=os.environ["TELEGRAM_BOT_TOKEN"])
     dp = Dispatcher()
+    dp.update.outer_middleware(_log_update)
     dp.include_router(router)
     on_goal, on_final = _make_announcers(bot)
-    service = SettlementService(store, on_goal=on_goal, on_final=on_final)
-    scores_task = asyncio.create_task(_consume_scores(service))
+    settlement = SettlementService(store, on_goal=on_goal, on_final=on_final)
+    scores_task = asyncio.create_task(_consume_scores(settlement))
+    from aiogram.types import BotCommand
+    await bot.set_my_commands(
+        [BotCommand(command=c, description=d) for c, d in BOT_COMMANDS])
     log.info("Torcida bot starting (polling + live settlement)")
     try:
         await dp.start_polling(bot)
