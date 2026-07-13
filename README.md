@@ -1,8 +1,12 @@
-# World Cup Live Pool (working title)
+# Torcida ⚽
 
 Live World Cup pools with odds-priced picks, an AI radio narrator with voice in your
 Telegram group, and poker-style payout structures. Built on TxLINE real-time football
 data anchored on Solana, for the TxODDS World Cup Hackathon (Superteam Earn, 2026).
+
+**Bot:** [@torcidaapp_bot](https://t.me/torcidaapp_bot) ·
+**Web:** [torcida.app](https://torcida.app) (soon) ·
+**X:** [@torcidaapp](https://x.com/torcidaapp)
 
 ## What it does
 
