@@ -1177,6 +1177,46 @@ def _incident_message(data: dict, label: str) -> tuple[str, str] | None:
     return None
 
 
+def _snapshot_score(items: list) -> tuple[int, int, str, bool] | None:
+    """Best current (home, away, phase, finished) from a scores snapshot.
+    Prefers the authoritative game_finalised record; else the highest-Seq event
+    that carries a Score."""
+    from ..engine.settlement import extract_score
+    final = None
+    best_seq, best = -1, None
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        parsed = extract_score({"data": it})
+        if parsed is None or parsed.home_goals is None:
+            continue
+        state = (parsed.home_goals, parsed.away_goals, parsed.phase, parsed.finished)
+        if str(it.get("Action", "")).lower() == "game_finalised" or parsed.finished:
+            final = (parsed.home_goals, parsed.away_goals, parsed.phase, True)
+        seq = it.get("Seq") or 0
+        if seq >= best_seq:
+            best_seq, best = seq, state
+    return final or best
+
+
+async def _rehydrate_scores(service: SettlementService) -> None:
+    """On startup, recover the current score for fixtures with open picks via
+    /scores/snapshot (the SSE stream doesn't replay on reconnect)."""
+    assert txline is not None
+    for fid in store.open_fixture_ids():
+        try:
+            snap = await txline.scores_snapshot(fid)
+            items = snap if isinstance(snap, list) else [snap]
+            got = _snapshot_score(items)
+            if got:
+                h, a, phase, finished = got
+                service.seed(fid, h, a, phase, finished)
+                log.info("rehydrated %s from snapshot: %d-%d finished=%s",
+                         fid, h, a, finished)
+        except Exception:
+            log.warning("rehydrate %s failed", fid, exc_info=True)
+
+
 async def _consume_scores(service: SettlementService, bot: Bot) -> None:
     assert txline is not None
     seen_incidents: set[str] = set()
@@ -1248,6 +1288,7 @@ async def main() -> None:
     on_goal, on_final, on_phase = _make_announcers(bot)
     settlement = SettlementService(store, on_goal=on_goal, on_final=on_final,
                                    on_phase=on_phase)
+    await _rehydrate_scores(settlement)  # recover score after downtime/restart
     scores_task = asyncio.create_task(_consume_scores(settlement, bot))
     kickoff_task = asyncio.create_task(_kickoff_alerts(bot))
     vitrine_task = asyncio.create_task(_vitrine_loop(bot))

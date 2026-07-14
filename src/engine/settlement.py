@@ -177,6 +177,22 @@ class SettlementService:
             if self.on_final:
                 await self.on_final(current, settled)
 
+    def seed(self, fixture_id: int, home: int, away: int, phase: str = "",
+             finished: bool = False) -> None:
+        """Silently set known state (from a snapshot) without firing callbacks.
+        Used to re-hydrate after a restart/reconnect so /aovivo is accurate and
+        a game that finished while we were down still settles (idempotent)."""
+        st = self._states.get(fixture_id) or FixtureState(fixture_id)
+        st.home_goals, st.away_goals = home, away
+        if phase:
+            st.phase = phase
+        if finished:
+            st.finished = True
+        self._states[fixture_id] = st
+        if st.finished and not st.settled:
+            self.settle_fixture(st)
+            st.settled = True
+
     def settle_fixture(self, state: FixtureState) -> int:
         home = state.home_goals or 0
         away = state.away_goals or 0

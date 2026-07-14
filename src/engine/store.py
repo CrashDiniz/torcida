@@ -255,6 +255,14 @@ class Store:
             ).fetchall()
         return [self._pick(r) for r in rows]
 
+    def open_fixture_ids(self) -> list[int]:
+        """Distinct fixtures that still have open picks (need settlement)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT DISTINCT fixture_id FROM picks WHERE status='open'"
+            ).fetchall()
+        return [r["fixture_id"] for r in rows]
+
     def update_pick(self, pick: Pick) -> None:
         with self._conn() as c:
             c.execute(

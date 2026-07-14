@@ -171,6 +171,26 @@ def test_extract_real_devnet_schema():
 
 
 @pytest.mark.asyncio
+async def test_seed_rehydrates_and_settles_silently(tmp_path):
+    """Re-hydration from a snapshot: set state without callbacks; a finished
+    game settles the open picks (idempotent), no goal/final announcements."""
+    store = Store(path=str(tmp_path / "s.sqlite3"))
+    pool = store.create_pool(Pool(id=uuid.uuid4().hex, name="T", creator_id=1))
+    store.join(pool.id, 2, "Bia")
+    store.place_pick(Pick(id="", pool_id=pool.id, user_id=2, fixture_id=700,
+                          market="1x2", selection="2", odds_decimal=3.35))
+    fired = []
+    svc = SettlementService(store=store,
+                            on_goal=lambda s: fired.append("g"),
+                            on_final=lambda s, n: fired.append("f"))
+    svc.seed(700, 0, 2, finished=True)
+    assert fired == []                                  # silent
+    assert store.standings(pool.id)[0] == (2, "Bia", 335)  # settled
+    svc.seed(700, 0, 2, finished=True)                  # idempotent
+    assert store.standings(pool.id)[0][2] == 335
+
+
+@pytest.mark.asyncio
 async def test_full_time_status5_settles(tmp_path):
     """StatusId 5 (F) is full time — settlement must fire and pay the winner."""
     store = Store(path=str(tmp_path / "s.sqlite3"))
