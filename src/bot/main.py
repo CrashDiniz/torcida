@@ -255,7 +255,7 @@ def _group_app_button() -> InlineKeyboardButton | None:
     return None
 
 
-@router.message(Command("jogo"))
+@router.message(Command("aovivo"))
 async def live_game(message: Message) -> None:
     """Current score of live fixtures, on demand."""
     lines = _live_score_lines()
@@ -1148,7 +1148,7 @@ BOT_COMMANDS = [
     ("novo", "criar um bolão neste grupo"),
     ("jogos", "palpitar nos próximos jogos"),
     ("app", "abrir o app (palpites + placar)"),
-    ("jogo", "placar ao vivo do jogo"),
+    ("aovivo", "placar ao vivo do jogo"),
     ("placar", "classificação ao vivo do bolão"),
     ("meus", "seus palpites"),
     ("boloes", "seus bolões"),
