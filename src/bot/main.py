@@ -509,7 +509,6 @@ async def _send_fixture_cards(message: Message, pool: Pool, user_id: int,
 async def place_pick(callback: CallbackQuery) -> None:
     _, pool_id, fixture_id, selection, odds_str = callback.data.split(":")
     user = callback.from_user
-    odds = float(odds_str)
     label = _selection_name(selection, store.fixture_label(int(fixture_id)))
     active = _pool_for_chat(callback.message.chat.id)
     if active is not None and active.id != pool_id:
@@ -521,19 +520,33 @@ async def place_pick(callback: CallbackQuery) -> None:
         await _answer(callback, "⛔ Bola rolando — palpites travados pra esse jogo!",
                       show_alert=True)
         return
+    # price at THIS moment, not at card-render time (cards go stale)
+    try:
+        assert txline is not None
+        snap = parse_snapshot(await txline.odds_snapshot(int(fixture_id)))
+        odds = {"1": snap.home, "X": snap.draw, "2": snap.away}[selection]
+    except Exception:
+        log.warning("live odds fetch failed, using card odds", exc_info=True)
+        odds = float(odds_str)
     store.join(pool_id, user.id, user.first_name or str(user.id))
     existing = store.pick_for(pool_id, user.id, int(fixture_id))
     if existing is not None:
-        if existing.selection == selection:
+        old_odds = existing.odds_decimal
+        if existing.selection == selection and abs(old_odds - odds) < 0.005:
             await _answer(callback,
-                          f"Você já palpitou {label} @ {existing.odds_decimal:.2f} 😉")
+                          f"Você já palpitou {label} @ {old_odds:.2f} 😉")
             return
         store.replace_pick(existing.id, selection, odds, time.time())
-        old_label = _selection_name(existing.selection,
-                                    store.fixture_label(int(fixture_id)))
-        await _answer(callback,
-                      f"Palpite trocado: {old_label} ➜ {label} "
-                      f"@ {odds:.2f} (vale {points_for(odds)} pts) 🔁")
+        if existing.selection == selection:
+            await _answer(callback,
+                          f"Odd atualizada: {label} @ {old_odds:.2f} ➜ {odds:.2f} "
+                          f"(vale {points_for(odds)} pts) 🔄")
+        else:
+            old_label = _selection_name(existing.selection,
+                                        store.fixture_label(int(fixture_id)))
+            await _answer(callback,
+                          f"Palpite trocado: {old_label} ➜ {label} "
+                          f"@ {odds:.2f} (vale {points_for(odds)} pts) 🔁")
         return
     pick = Pick(id=uuid.uuid4().hex, pool_id=pool_id, user_id=user.id,
                 fixture_id=int(fixture_id), market="1x2",
@@ -1144,16 +1157,22 @@ async def _log_update(handler, event, data):
     return await handler(event, data)
 
 
-BOT_COMMANDS = [
-    ("novo", "criar um bolão neste grupo"),
+# Group menu is trimmed to the live-play essentials to keep it clean; every
+# other command still works if typed. Personal commands live in the DM menu,
+# where Telegram doesn't append @botname. (setMyCommands only controls the
+# displayed list — hidden commands remain callable.)
+GROUP_COMMANDS = [
     ("jogos", "palpitar nos próximos jogos"),
-    ("app", "abrir o app (palpites + placar)"),
     ("aovivo", "placar ao vivo do jogo"),
-    ("placar", "classificação ao vivo do bolão"),
+    ("placar", "classificação do bolão"),
+    ("app", "abrir o app 🎫"),
+]
+PRIVATE_COMMANDS = [
+    ("app", "abrir o app (palpites + placar)"),
     ("meus", "seus palpites"),
     ("boloes", "seus bolões"),
-    ("sair", "sair do bolão deste chat"),
-    ("salas", "montar tópicos do grupo (admin)"),
+    ("novo", "criar um bolão (num grupo)"),
+    ("sair", "sair de um bolão"),
 ]
 
 
@@ -1172,9 +1191,14 @@ async def main() -> None:
     scores_task = asyncio.create_task(_consume_scores(settlement))
     kickoff_task = asyncio.create_task(_kickoff_alerts(bot))
     vitrine_task = asyncio.create_task(_vitrine_loop(bot))
-    from aiogram.types import BotCommand
+    from aiogram.types import (BotCommand, BotCommandScopeAllGroupChats,
+                               BotCommandScopeAllPrivateChats)
     await bot.set_my_commands(
-        [BotCommand(command=c, description=d) for c, d in BOT_COMMANDS])
+        [BotCommand(command=c, description=d) for c, d in GROUP_COMMANDS],
+        scope=BotCommandScopeAllGroupChats())
+    await bot.set_my_commands(
+        [BotCommand(command=c, description=d) for c, d in PRIVATE_COMMANDS],
+        scope=BotCommandScopeAllPrivateChats())
     webapp_url = os.environ.get("WEBAPP_URL")
     if webapp_url:
         # fixed "app tab" next to the input field in everyone's DM with the bot
