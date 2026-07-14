@@ -1,10 +1,17 @@
 """Settlement service: consume score events, track fixture state, settle picks.
 
-Calibrated against the official TxLINE OpenAPI spec (Scores schema): soccer
-goals live in ScoreSoccer.Participant{1,2}.Total.Goals and match phase in
-StatusSoccerId (NS/H1/HT/H2/ET1/ET2/PE/... with F/FET/FPE/END terminal).
-Legacy flat keys (HomeGoals/Status/...) are kept as fallbacks for tests and
-schema drift. 1X2 settles on Total (regular time), which is the market rule.
+Calibrated against the REAL TxLINE devnet soccer feed (not just the OpenAPI
+`Scores` schema, which documents different field names). Observed live payload:
+  - running score:  Score.Participant{1,2}.Total.Goals  — and the `Goals` key
+    is OMITTED when a side has 0 (0 goals => absent, NOT null); treat absent
+    as zero, or the whole score reads as "unknown" and never settles.
+  - match phase:    StatusId (int): 1=NS, 2=H1, 3=HT, 4=H2 (confirmed from a
+    full recording); the numeric full-time id is still unconfirmed with TxLINE,
+    so finish is detected from the Action stream + the spec's string codes.
+  - GameState stays the literal string "scheduled" the whole match — useless
+    as a live/finished signal; do NOT rely on it.
+Legacy schemas (ScoreSoccer/StatusSoccerId, flat HomeGoals/Status) stay as
+fallbacks for tests and drift. 1X2 settles on Total (regular time).
 
 Emits callbacks so the bot can announce goals and final results in groups.
 """
@@ -21,9 +28,14 @@ log = logging.getLogger("settlement")
 
 FINISHED_MARKERS = {"finished", "ft", "full_time", "fulltime", "ended", "final"}
 LIVE_MARKERS = {"in_running", "inrunning", "in_play", "inplay", "live"}
-# StatusSoccerId codes from the TxLINE spec
+# StatusSoccerId string codes from the TxLINE spec (legacy/fallback path)
 SOCCER_LIVE_CODES = {"h1", "ht", "h2", "et1", "htet", "et2", "pe", "wet", "wpe"}
 SOCCER_FINAL_CODES = {"f", "fet", "fpe", "end"}
+# numeric StatusId -> phase code (confirmed 1..4 from a full match recording)
+SOCCER_STATUS_INT = {1: "ns", 2: "h1", 3: "ht", 4: "h2"}
+# Action-stream signals for full time (GameState/StatusId can't be trusted)
+FINAL_ACTIONS = {"fulltime_finalised", "full_time_finalised", "match_finished",
+                 "fulltime", "full_time", "match_ended", "game_finished"}
 
 
 PHASE_LABELS = {
@@ -33,6 +45,9 @@ PHASE_LABELS = {
     "et2": "⏱ Prorrogação — 2º tempo",
     "pe": "🥅 Pênaltis!",
 }
+# forward-only order: sparse/out-of-order events must not re-announce a phase
+PHASE_ORDER = {"ns": 0, "h1": 1, "ht": 2, "h2": 3, "et1": 4, "htet": 4,
+               "et2": 5, "pe": 6, "wet": 5, "wpe": 6}
 
 
 @dataclass
@@ -43,7 +58,7 @@ class FixtureState:
     away_goals: int | None = None
     finished: bool = False
     settled: bool = False
-    phase: str = ""  # last StatusSoccerId code seen (h1/ht/h2/...)
+    phase: str = ""  # last phase code seen (h1/ht/h2/...)
 
 
 def _first(data: dict, *keys: str):
@@ -55,7 +70,7 @@ def _first(data: dict, *keys: str):
 
 
 def extract_score(event: dict) -> FixtureState | None:
-    """Best-effort extraction of (fixture, score, finished) from a stream event."""
+    """Best-effort extraction of (fixture, score, phase, finished) from a stream event."""
     data = event.get("data", event)
     if not isinstance(data, dict):
         return None
@@ -71,34 +86,39 @@ def extract_score(event: dict) -> FixtureState | None:
             return None
 
     home = away = None
-    score = _first(data, "ScoreSoccer", "scoreSoccer", "Score", "score")
+    score = _first(data, "Score", "ScoreSoccer", "score", "scoreSoccer")
     if isinstance(score, dict):
-        def _goals(part: str) -> int | None:
+        def _goals(part: str) -> int:
+            # `Goals` is omitted for a 0-goal side — absent means zero
             total = (score.get(part) or {}).get("Total") or {}
             try:
-                return int(total.get("Goals"))
+                return int(total.get("Goals") or 0)
             except (TypeError, ValueError):
-                return None
+                return 0
         home, away = _goals("Participant1"), _goals("Participant2")
     if home is None or away is None:
         home = _int("HomeGoals", "homeGoals", "Score1", "Participant1Score", "home")
         away = _int("AwayGoals", "awayGoals", "Score2", "Participant2Score", "away")
 
+    action = str(_first(data, "Action", "action") or "").lower()
+    status_int = _int("StatusId", "statusId")
     code = _first(data, "StatusSoccerId", "statusSoccerId")
     if isinstance(code, dict):  # enum may serialise as {"F": {}}
         code = next(iter(code), "")
     code = str(code or "").lower()
-    state = str(_first(data, "GameState", "gameState", "Status", "Phase",
-                       "MatchStatus") or "").lower()
-    finished = code in SOCCER_FINAL_CODES or any(
-        m in state for m in FINISHED_MARKERS)
-    live = code in SOCCER_LIVE_CODES or any(m in state for m in LIVE_MARKERS)
+    phase = SOCCER_STATUS_INT.get(status_int) or code
+    state = str(_first(data, "Status", "Phase", "MatchStatus") or "").lower()
+
+    finished = (action in FINAL_ACTIONS or code in SOCCER_FINAL_CODES
+                or any(m in state for m in FINISHED_MARKERS))
+    live = (phase in SOCCER_LIVE_CODES or code in SOCCER_LIVE_CODES
+            or any(m in state for m in LIVE_MARKERS))
     if home is None or away is None:
         # score-less event (comment, lineup) — only a live/final signal matters
         if not (finished or live):
             return None
-        return FixtureState(int(fixture_id), None, None, finished, phase=code)
-    return FixtureState(int(fixture_id), home, away, finished, phase=code)
+        return FixtureState(int(fixture_id), None, None, finished, phase=phase)
+    return FixtureState(int(fixture_id), home, away, finished, phase=phase)
 
 
 @dataclass
@@ -113,32 +133,39 @@ class SettlementService:
         parsed = extract_score(event)
         if parsed is None:
             return
-        prev = self._states.get(parsed.fixture_id)
-        current = self._states.setdefault(parsed.fixture_id, parsed)
-        prev_phase = prev.phase if prev else ""
-        if prev is None:
-            # sparse feeds only emit on incidents: the FIRST score event we see
-            # may itself be the goal — announce a non-0x0 opening score as news
-            if (parsed.home_goals or 0, parsed.away_goals or 0) != (0, 0) \
-                    and not parsed.finished and self.on_goal:
-                await self.on_goal(current)
-        else:
-            if parsed.home_goals is not None and parsed.away_goals is not None:
-                score_known = prev.home_goals is not None
-                goal_scored = score_known and (
-                    parsed.home_goals, parsed.away_goals) != (
-                    prev.home_goals, prev.away_goals)
-                current.home_goals = parsed.home_goals
-                current.away_goals = parsed.away_goals
-                if goal_scored and self.on_goal:
+        current = self._states.get(parsed.fixture_id)
+        if current is None:
+            current = FixtureState(parsed.fixture_id)
+            self._states[parsed.fixture_id] = current
+
+        # score: announce a goal on an INCREASE; a VAR-disallowed goal drops
+        # the count back — announce the reversal so the group is never left
+        # believing a phantom scoreline
+        if parsed.home_goals is not None and parsed.away_goals is not None:
+            base_h, base_a = current.home_goals or 0, current.away_goals or 0
+            increased = parsed.home_goals > base_h or parsed.away_goals > base_a
+            decreased = parsed.home_goals < base_h or parsed.away_goals < base_a
+            current.home_goals = parsed.home_goals
+            current.away_goals = parsed.away_goals
+            if not parsed.finished:
+                if increased and self.on_goal:
                     await self.on_goal(current)
-            current.finished = current.finished or parsed.finished
-        # phase transition (halftime, second half, ...) announced once
-        if parsed.phase and parsed.phase != prev_phase:
+                elif decreased and self.on_phase:
+                    await self.on_phase(
+                        current, f"❌ <b>VAR</b>: gol anulado — placar volta pra "
+                        f"<b>{parsed.home_goals} x {parsed.away_goals}</b>")
+
+        # phase transition — forward only, announced once per phase
+        new_rank = PHASE_ORDER.get(parsed.phase)
+        cur_rank = PHASE_ORDER.get(current.phase, -1)
+        if new_rank is not None and new_rank > cur_rank:
             current.phase = parsed.phase
             label = PHASE_LABELS.get(parsed.phase)
-            if label and not current.finished and self.on_phase:
+            if label and not parsed.finished and self.on_phase:
                 await self.on_phase(current, label)
+
+        if parsed.finished:
+            current.finished = True
         if current.finished and not current.settled:
             settled = self.settle_fixture(current)
             current.settled = True

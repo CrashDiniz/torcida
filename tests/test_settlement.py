@@ -134,6 +134,69 @@ async def test_sparse_feed_first_event_is_the_goal(tmp_path):
     assert goals == [(1, 0)]
 
 
+def real_ev(fixture_id=700, p1=None, p2=None, status_id=None, action="",
+            confirmed=True):
+    """Event in the REAL devnet soccer schema: top-level `Score` with the
+    `Goals` key OMITTED for a 0-goal side, numeric `StatusId`, GameState
+    frozen at 'scheduled'."""
+    def _side(goals):
+        d = {"YellowCards": 0, "Corners": 0}
+        if goals:  # 0 goals => key omitted, exactly like the live feed
+            d["Goals"] = goals
+        return {"Total": d, "HT": d, "H1": d}
+    data = {"FixtureId": fixture_id, "GameState": "scheduled",
+            "Action": action, "Type": "Soccer", "Confirmed": confirmed}
+    if status_id is not None:
+        data["StatusId"] = status_id
+    if p1 is not None:
+        data["Score"] = {"Participant1": _side(p1), "Participant2": _side(p2)}
+    return {"kind": "scores", "recv_ts": 0, "data": data}
+
+
+def test_extract_real_devnet_schema():
+    # 0 x 1 with Participant1 Goals key absent (must read as 0, not unknown)
+    s = extract_score(real_ev(700, 0, 1, status_id=2))
+    assert (s.home_goals, s.away_goals) == (0, 1)
+    assert s.phase == "h1" and not s.finished
+    assert extract_score(real_ev(700, status_id=3)).phase == "ht"
+    assert extract_score(real_ev(700, status_id=4)).phase == "h2"
+    # GameState 'scheduled' must NOT read as live on its own
+    bare = extract_score({"data": {"FixtureId": 9, "GameState": "scheduled"}})
+    assert bare is None
+
+
+@pytest.mark.asyncio
+async def test_real_match_with_var_reversal(tmp_path):
+    """Replays the shape of the recorded FRA x ESP: penalty, HT, H2, goal,
+    then a VAR-disallowed goal that must NOT stick as a scoreline."""
+    store = Store(path=str(tmp_path / "s.sqlite3"))
+    pool = store.create_pool(Pool(id=uuid.uuid4().hex, name="T", creator_id=1))
+    store.join(pool.id, 2, "Bia")
+    store.place_pick(Pick(id="", pool_id=pool.id, user_id=2, fixture_id=700,
+                          market="1x2", selection="2", odds_decimal=3.35))
+    goals, notes = [], []
+
+    async def on_goal(s): goals.append((s.home_goals, s.away_goals))
+    async def on_phase(s, l): notes.append(l)
+
+    svc = SettlementService(store=store, on_goal=on_goal, on_phase=on_phase)
+    await svc.handle_event(real_ev(700, status_id=2, action="kickoff"))
+    await svc.handle_event(real_ev(700, 0, 1, status_id=2, action="penalty_outcome"))
+    await svc.handle_event(real_ev(700, status_id=3, action="halftime_finalised"))
+    await svc.handle_event(real_ev(700, status_id=4, action="kickoff"))
+    await svc.handle_event(real_ev(700, status_id=4, action="kickoff"))   # dup
+    await svc.handle_event(real_ev(700, 0, 2, status_id=4, action="goal"))
+    await svc.handle_event(real_ev(700, 0, 3, status_id=4, action="goal"))
+    await svc.handle_event(real_ev(700, 0, 2, status_id=4, action="action_discarded"))
+
+    assert goals == [(0, 1), (0, 2), (0, 3)]
+    assert notes[0] == "🟡 Intervalo"
+    assert notes[1] == "🟢 Bola rolando — 2º tempo!"
+    assert notes.count("🟢 Bola rolando — 2º tempo!") == 1  # no duplicate
+    assert "VAR" in notes[-1]  # reversal announced
+    assert svc._states[700].home_goals == 0 and svc._states[700].away_goals == 2
+
+
 @pytest.mark.asyncio
 async def test_phase_transitions_announced_once(tmp_path):
     store = Store(path=str(tmp_path / "s.sqlite3"))
