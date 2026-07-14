@@ -1094,6 +1094,10 @@ async def _kickoff_alerts(bot: Bot) -> None:
                     log.info("kickoff alert for %s sent to %d chat(s)", fid, len(chats))
                 elif fid not in started and delta <= 0 and delta > -3600 * 3:
                     started.add(fid)
+                    # survives restarts (chat_id 0 = global flag namespace)
+                    if store.chat_topic(0, f"started_{fid}"):
+                        continue
+                    store.set_chat_topic(0, f"started_{fid}", 1)
                     text = (f"🟢 <b>BOLA ROLANDO!</b>\n"
                             f"⚽ <b>{html.escape(label)}</b> começou.\n\n"
                             f"⛔ Palpites travados. Gols e placar saem em 📢 — "
