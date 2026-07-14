@@ -1148,13 +1148,59 @@ async def _vitrine_loop(bot: Bot) -> None:
         await asyncio.sleep(VITRINE_REFRESH_S)
 
 
-async def _consume_scores(service: SettlementService) -> None:
+def _incident_message(data: dict, label: str) -> tuple[str, str] | None:
+    """High-drama incidents worth a group ping (not the goal/score itself,
+    which settlement owns). Returns (dedup_key, text) or None.
+    Skips the noise: possession/shot/corner/throw-in/free-kick/etc."""
+    action = str(data.get("Action") or "").lower()
+    d = data.get("Data") or {}
+    home, away = (label.split(" x ", 1) if " x " in label else (label, ""))
+    team = {1: home, 2: away}.get(d.get("Participant"))
+    incident_id = data.get("Id")
+    key = f"{data.get('FixtureId')}:{action}:{incident_id}"
+
+    if action == "penalty":
+        who = f" para <b>{html.escape(team)}</b>" if team else ""
+        return key, f"🥅 <b>PÊNALTI</b>{who}! Segura o coração… 😰"
+    if action == "penalty_outcome" and str(d.get("Outcome", "")).lower() != "scored":
+        who = f"<b>{html.escape(team)}</b> " if team else "Alguém "
+        return key, f"😱 {who}<b>PERDEU o pênalti!</b> Que isso!"
+    if d.get("RedCard") or action == "red_card":
+        who = f" — {html.escape(team)} com um a menos!" if team else "!"
+        return key, f"🟥 <b>CARTÃO VERMELHO</b>{who} 🍿"
+    if action == "var":
+        what = str(d.get("Type") or "").lower()
+        alvo = {"goal": "um gol", "penalty": "um pênalti"}.get(what, "o lance")
+        return key, f"📺 <b>VAR</b> analisando {alvo}… ⏸️ segura a emoção!"
+    if action == "additional_time" and d.get("Minutes"):
+        return key, f"⏱ <b>+{int(d['Minutes'])} min</b> de acréscimos!"
+    return None
+
+
+async def _consume_scores(service: SettlementService, bot: Bot) -> None:
     assert txline is not None
+    seen_incidents: set[str] = set()
     async for event in txline.stream("scores"):
         try:
             await service.handle_event(event)
         except Exception:
             log.exception("settlement failed for event")
+        try:
+            data = event.get("data", event)
+            fid = data.get("FixtureId")
+            if not fid:
+                continue
+            chats = store.chats_for_fixture(int(fid))
+            if not chats:
+                continue
+            msg = _incident_message(data, await _fixture_label(int(fid)))
+            if msg and msg[0] not in seen_incidents:
+                seen_incidents.add(msg[0])
+                for _, chat_id in chats:
+                    await _safe_send(bot, chat_id, msg[1])
+                log.info("incident announced: %s", msg[0])
+        except Exception:
+            log.warning("incident announce failed", exc_info=True)
 
 
 async def _log_update(handler, event, data):
@@ -1202,7 +1248,7 @@ async def main() -> None:
     on_goal, on_final, on_phase = _make_announcers(bot)
     settlement = SettlementService(store, on_goal=on_goal, on_final=on_final,
                                    on_phase=on_phase)
-    scores_task = asyncio.create_task(_consume_scores(settlement))
+    scores_task = asyncio.create_task(_consume_scores(settlement, bot))
     kickoff_task = asyncio.create_task(_kickoff_alerts(bot))
     vitrine_task = asyncio.create_task(_vitrine_loop(bot))
     from aiogram.types import (BotCommand, BotCommandScopeAllGroupChats,
