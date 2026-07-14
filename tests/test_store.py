@@ -32,6 +32,23 @@ def test_join_is_idempotent(tmp_path):
     assert standings[0][1] == "Crash"
 
 
+def test_leave_removes_entry_and_picks(tmp_path):
+    store = make_store(tmp_path)
+    pool = store.create_pool(make_pool())
+    store.join(pool.id, 42, "Crash")
+    store.join(pool.id, 7, "Ana")
+    store.place_pick(Pick(id="", pool_id=pool.id, user_id=42, fixture_id=900,
+                          market="1x2", selection="1", odds_decimal=2.0))
+
+    assert store.leave(pool.id, 42) is True
+    assert store.leave(pool.id, 42) is False  # already gone
+    assert store.picks_for_user(pool.id, 42) == []
+    assert [uid for uid, _, _ in store.standings(pool.id)] == [7]
+    assert [p.id for p in store.pools_for_user(42)] == []
+    assert store.has_left(pool.id, 42) is True  # comeback is recognizable
+    assert store.has_left(pool.id, 7) is False
+
+
 def test_pool_by_chat_restores_binding(tmp_path):
     store = make_store(tmp_path)
     old = store.create_pool(make_pool(), telegram_chat_id=-100)
@@ -110,6 +127,17 @@ def test_fixture_labels_roundtrip(tmp_path):
     store.set_fixture_label(900, "França x Espanha")
     store.set_fixture_label(900, "France x Spain")  # upsert
     assert store.fixture_label(900) == "France x Spain"
+
+
+def test_chat_topics_roundtrip(tmp_path):
+    store = make_store(tmp_path)
+    assert store.chat_topic(-100, "anuncios") is None
+    store.set_chat_topic(-100, "anuncios", 7)
+    store.set_chat_topic(-100, "anuncios", 8)  # upsert
+    store.set_chat_topic(-100, "bolao", 9)
+    assert store.chat_topic(-100, "anuncios") == 8
+    assert store.chat_topic(-100, "bolao") == 9
+    assert store.chat_topic(-999, "anuncios") is None
 
 
 def test_full_pick_cycle_updates_standings(tmp_path):

@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS fixture_labels (
   fixture_id INTEGER PRIMARY KEY,
   label TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pool_leavers (
+  pool_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  left_at REAL NOT NULL,
+  PRIMARY KEY (pool_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS chat_topics (
+  chat_id INTEGER NOT NULL,
+  topic TEXT NOT NULL,
+  thread_id INTEGER NOT NULL,
+  PRIMARY KEY (chat_id, topic)
+);
 """
 
 
@@ -156,6 +168,29 @@ class Store:
             )
         return entry
 
+    def leave(self, pool_id: str, user_id: int) -> bool:
+        """Remove the user's entry and picks; True if they were in the pool."""
+        import time as _time
+        with self._conn() as c:
+            gone = c.execute(
+                "DELETE FROM entries WHERE pool_id=? AND user_id=?",
+                (pool_id, user_id),
+            ).rowcount
+            c.execute("DELETE FROM picks WHERE pool_id=? AND user_id=?",
+                      (pool_id, user_id))
+            if gone:  # remembered so a comeback can be celebrated
+                c.execute("INSERT OR REPLACE INTO pool_leavers VALUES (?,?,?)",
+                          (pool_id, user_id, _time.time()))
+        return bool(gone)
+
+    def has_left(self, pool_id: str, user_id: int) -> bool:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT 1 FROM pool_leavers WHERE pool_id=? AND user_id=?",
+                (pool_id, user_id),
+            ).fetchone()
+        return row is not None
+
     def standings(self, pool_id: str) -> list[tuple[int, str, int]]:
         """[(user_id, display_name, points)] ordered by points desc."""
         with self._conn() as c:
@@ -233,6 +268,29 @@ class Store:
         with self._conn() as c:
             c.execute("INSERT OR REPLACE INTO fixture_labels VALUES (?,?)",
                       (fixture_id, label))
+
+    def chat_for_pool(self, pool_id: str) -> int | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT telegram_chat_id FROM pools WHERE id=?", (pool_id,)
+            ).fetchone()
+        return row["telegram_chat_id"] if row else None
+
+    def set_chat_topic(self, chat_id: int, topic: str, thread_id: int) -> None:
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO chat_topics VALUES (?,?,?) ON CONFLICT(chat_id, topic) "
+                "DO UPDATE SET thread_id=excluded.thread_id",
+                (chat_id, topic, thread_id),
+            )
+
+    def chat_topic(self, chat_id: int, topic: str) -> int | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT thread_id FROM chat_topics WHERE chat_id=? AND topic=?",
+                (chat_id, topic),
+            ).fetchone()
+        return row["thread_id"] if row else None
 
     def fixture_label(self, fixture_id: int) -> str | None:
         with self._conn() as c:
