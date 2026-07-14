@@ -269,6 +269,14 @@ class Store:
             c.execute("INSERT OR REPLACE INTO fixture_labels VALUES (?,?)",
                       (fixture_id, label))
 
+    def bound_chats(self) -> list[int]:
+        """Distinct telegram chats with an active (bound) pool."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT DISTINCT telegram_chat_id FROM pools "
+                "WHERE telegram_chat_id IS NOT NULL").fetchall()
+        return [r["telegram_chat_id"] for r in rows]
+
     def chat_for_pool(self, pool_id: str) -> int | None:
         with self._conn() as c:
             row = c.execute(

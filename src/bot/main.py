@@ -88,6 +88,63 @@ async def _answer(callback: CallbackQuery, text: str, **kwargs) -> None:
         await callback.answer(text, **kwargs)
     except Exception:
         log.info("stale callback answer dropped: %s", text)
+
+
+async def _refresh_vitrine(bot: Bot, chat_id: int) -> None:
+    """Auto-edited showcase pinned in the 🏆 topic: active pool, top 3, next
+    kickoff, and buttons to play without ever leaving the group. Never raises."""
+    try:
+        pool = _pool_for_chat(chat_id)
+        thread_id = store.chat_topic(chat_id, "bolao")
+        if pool is None or thread_id is None:
+            return
+        rows = store.standings(pool.id)
+        medals = ["🥇", "🥈", "🥉"]
+        board = "\n".join(
+            f"{medals[i]} <b>{html.escape(name)}</b> — {points} pts"
+            for i, (_, name, points) in enumerate(rows[:3])) or "<i>Seja o primeiro!</i>"
+        hint = await _next_fixture_hint()
+        next_line = f"\n⏱ {html.escape(hint)}" if hint else ""
+        text = (
+            f"🏆 <b>BOLÃO ATIVO</b>\n\n"
+            f"⚽ <b>{html.escape(pool.name)}</b>\n"
+            f"👥 {len(rows)} palpiteiro{'s' if len(rows) != 1 else ''} · "
+            f"{PAYOUT_LABELS[pool.payout_preset]}\n\n"
+            f"{board}{next_line}\n\n"
+            f"🤫 Palpite é secreto até a bola rolar — palpita aqui embaixo 👇")
+        rows_kb = []
+        direct = _group_app_button()
+        if direct:
+            rows_kb.append([direct])
+        rows_kb.append([
+            InlineKeyboardButton(text="🎯 Palpitar por aqui",
+                                 callback_data=f"fezinha:{pool.id}"),
+            _share_button(await _invite_link(bot, pool), pool),
+        ])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=rows_kb)
+
+        msg_id = store.chat_topic(chat_id, "vitrine_msg")
+        if msg_id:
+            try:
+                await bot.edit_message_text(
+                    text, chat_id=chat_id, message_id=msg_id,
+                    parse_mode="HTML", reply_markup=keyboard)
+                return
+            except Exception as e:
+                if "message is not modified" in str(e).lower():
+                    return
+                log.info("vitrine edit failed, reposting: %s", e)
+        sent = await bot.send_message(chat_id, text, parse_mode="HTML",
+                                      reply_markup=keyboard,
+                                      message_thread_id=thread_id)
+        store.set_chat_topic(chat_id, "vitrine_msg", sent.message_id)
+        try:
+            await bot.pin_chat_message(chat_id, sent.message_id,
+                                       disable_notification=True)
+        except Exception:
+            log.info("vitrine pin failed in chat %s", chat_id)
+    except Exception:
+        log.warning("vitrine refresh failed for chat %s", chat_id, exc_info=True)
 STATUS_EMOJI = {PickStatus.OPEN: "⏳", PickStatus.WON: "✅",
                 PickStatus.LOST: "❌", PickStatus.VOID: "⚪"}
 
@@ -432,6 +489,9 @@ async def place_pick(callback: CallbackQuery) -> None:
     await _answer(callback,
                   f"Palpite registrado: {label} @ {odds:.2f} "
                   f"(vale {points_for(odds)} pts) 🎯", show_alert=False)
+    bound = store.chat_for_pool(pool_id)
+    if bound:
+        asyncio.create_task(_refresh_vitrine(callback.bot, bound))
     # social nudge on the user's FIRST pick in the pool (never reveals the pick)
     if (callback.message.chat.type != "private"
             and len(store.picks_for_user(pool_id, user.id)) == 1):
@@ -561,14 +621,16 @@ async def setup_topics(message: Message) -> None:
             if store.chat_topic(chat.id, key) is None:
                 topic = await message.bot.create_forum_topic(chat.id, name=name)
                 store.set_chat_topic(chat.id, key, topic.message_thread_id)
-        # announcements are bot-only: a closed topic blocks members from
-        # typing, while the bot (topics admin) still posts into it
-        try:
-            await message.bot.close_forum_topic(
-                chat.id, store.chat_topic(chat.id, "anuncios"))
-        except Exception as e:  # re-running /salas: already closed is fine
-            if "TOPIC_NOT_MODIFIED" not in str(e):
-                raise
+        # announcements + bolão are bot-only: a closed topic blocks members
+        # from typing, while the bot (topics admin) still posts into it —
+        # bolão becomes a pure "showcase" tab (navigate + tap, no chat)
+        for key in ("anuncios", "bolao"):
+            try:
+                await message.bot.close_forum_topic(
+                    chat.id, store.chat_topic(chat.id, key))
+            except Exception as e:  # re-running /salas: already closed is fine
+                if "TOPIC_NOT_MODIFIED" not in str(e):
+                    raise
         try:
             await message.bot.edit_general_forum_topic(chat.id, name="💬 Resenha")
         except Exception as e:  # re-running /salas: name unchanged is fine
@@ -777,6 +839,7 @@ async def confirm_leave(callback: CallbackQuery) -> None:
             callback.bot, bound_chat,
             f"👋 <b>{who}</b> saiu de <b>{name}</b> — vaga liberada! "
             f"Bora aproveitar: /jogos")
+        asyncio.create_task(_refresh_vitrine(callback.bot, bound_chat))
 
     hint = await _next_fixture_hint()
     comeback = (f"😢 Se bater o arrependimento: {html.escape(hint)} — "
@@ -967,6 +1030,18 @@ async def _kickoff_alerts(bot: Bot) -> None:
         await asyncio.sleep(60)
 
 
+VITRINE_REFRESH_S = 45
+
+
+async def _vitrine_loop(bot: Bot) -> None:
+    """Keep every group's showcase fresh (covers picks made via the Mini App,
+    which lives in another process); 'not modified' edits are no-ops."""
+    while True:
+        for chat_id in store.bound_chats():
+            await _refresh_vitrine(bot, chat_id)
+        await asyncio.sleep(VITRINE_REFRESH_S)
+
+
 async def _consume_scores(service: SettlementService) -> None:
     assert txline is not None
     async for event in txline.stream("scores"):
@@ -1015,6 +1090,7 @@ async def main() -> None:
     settlement = SettlementService(store, on_goal=on_goal, on_final=on_final)
     scores_task = asyncio.create_task(_consume_scores(settlement))
     kickoff_task = asyncio.create_task(_kickoff_alerts(bot))
+    vitrine_task = asyncio.create_task(_vitrine_loop(bot))
     from aiogram.types import BotCommand
     await bot.set_my_commands(
         [BotCommand(command=c, description=d) for c, d in BOT_COMMANDS])
@@ -1030,6 +1106,7 @@ async def main() -> None:
     finally:
         scores_task.cancel()
         kickoff_task.cancel()
+        vitrine_task.cancel()
 
 
 if __name__ == "__main__":
