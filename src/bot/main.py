@@ -32,6 +32,7 @@ from ..engine.scoring import points_for
 from ..engine.settlement import FixtureState, SettlementService
 from ..engine.store import Store
 from ..ingest.txline import TxLineClient
+from ..narrator.narrator import narrate
 
 log = logging.getLogger("bot")
 router = Router()
@@ -851,6 +852,18 @@ async def _safe_send(bot: Bot, chat_id: int, text: str, reply_markup=None) -> No
             log.warning("announce to chat %s failed", chat_id, exc_info=True)
 
 
+async def _send_voice_note(bot: Bot, chat_ids: list[int], ogg) -> None:
+    """Voice note to each chat's announcements topic; never raises."""
+    from aiogram.types import FSInputFile
+    for chat_id in chat_ids:
+        try:
+            await bot.send_voice(
+                chat_id, FSInputFile(ogg),
+                message_thread_id=store.chat_topic(chat_id, "anuncios"))
+        except Exception:
+            log.warning("voice note to chat %s failed", chat_id, exc_info=True)
+
+
 def _make_announcers(bot: Bot):
     async def on_goal(state: FixtureState) -> None:
         chats = store.chats_for_fixture(state.fixture_id)
@@ -861,6 +874,10 @@ def _make_announcers(bot: Bot):
                 f"<b>{state.home_goals} x {state.away_goals}</b>")
         for _, chat_id in chats:
             await _safe_send(bot, chat_id, text)
+        ogg = await narrate("goal", label, state.home_goals or 0,
+                            state.away_goals or 0)
+        if ogg:
+            await _send_voice_note(bot, [c for _, c in chats], ogg)
 
     async def on_final(state: FixtureState, settled: int) -> None:
         label = await _fixture_label(state.fixture_id)
@@ -879,6 +896,10 @@ def _make_announcers(bot: Bot):
                 f"<b>{home} x {away}</b>\n\n"
                 f"Palpites liquidados. 📊 <b>{html.escape(pool.name)}</b>:\n"
                 f"{board}")
+            ogg = await narrate("final", label, home, away,
+                                leader=rows[0][1] if rows else "")
+            if ogg:
+                await _send_voice_note(bot, [chat_id], ogg)
 
     return on_goal, on_final
 
