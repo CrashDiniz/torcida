@@ -45,38 +45,41 @@ EDGE_STYLE = {
 # PT-BR "resenha" style: elongated goal cry + a bordão + tie-in to the bolão
 # (naming the side that scored and, at full time, the leader) — the hook no
 # real broadcaster has. Research: BR fans want emotion + catchphrases.
+# PT-BR "resenha" style: elongated goal cry + a bordão + tie-in to the bolão.
+# {score} is always winner-first ("Espanha 2 a 0 França"), the natural way a
+# result is called. Research: BR fans want emotion + catchphrases.
 GOAL_TEMPLATES = [
     "GOOOOOOOL! É GOL, meu amigo, é GOL! {score_side} balançou a rede! "
-    "{home} {h}, {away} {a}. Haja coração no bolão — tem gente passando MAL agora!",
-    "OLHA O GOOOOL! {score_side} marca! {home} {h} a {a} {away}. "
+    "{score}. Haja coração no bolão — tem gente passando MAL agora!",
+    "OLHA O GOOOOL! {score_side} marca! {score}. "
     "Anota no álbum, torcedor: esse ponto tá valendo!",
-    "É DELE, GOOOOL! {score_side} na frente! {home} {h}, {away} {a}. "
+    "É DELE, GOOOOL! {score_side} na frente! {score}. "
     "Faça a sua festa quem acertou — o resto que chore no grupo!",
-    "SEGURA ESSA! GOOOL! {score_side} não perdoou! {home} {h} a {a} {away}. "
+    "SEGURA ESSA! GOOOL! {score_side} não perdoou! {score}. "
     "O bolão pegou fogo — sai que é suuua!",
 ]
 
 FINAL_TEMPLATES = [
-    "Apitou o juiz, ACABOU! {home} {h}, {away} {a}. "
+    "Apitou o juiz, ACABOU! {score}. "
     "E no bolão, quem faz a festa é {leader} — esse tá voando!",
-    "É O FIM, senhoras e senhores! {home} {h} a {a} {away}. "
+    "É O FIM, senhoras e senhores! {score}. "
     "Palpites liquidados e {leader} carimbou a liderança. O resto: tenta na próxima!",
-    "Fim de jogo! {home} {h}, {away} {a}. Pode anotar no álbum: "
+    "Fim de jogo! {score}. Pode anotar no álbum: "
     "{leader} é quem manda nesse bolão agora. Haja coração!",
 ]
 
 
 # goal lines that name a real group member — the hook no broadcaster has
 GOAL_NAMED_HAPPY = [
-    "GOOOOOOL! {score_side} balançou a rede! {home} {h}, {away} {a}. "
+    "GOOOOOOL! {score_side} balançou a rede! {score}. "
     "E o {name} tá PULANDO — cravou {score_side} e agora só falta a taça!",
-    "É GOL! {score_side} marca! {home} {h} a {a} {away}. "
+    "É GOL! {score_side} marca! {score}. "
     "Anota aí: o {name} palpitou certinho e tá voando no bolão!",
 ]
 GOAL_NAMED_SAD = [
-    "GOOOL! {score_side} na frente! {home} {h}, {away} {a}. "
+    "GOOOL! {score_side} na frente! {score}. "
     "E o {name}, coitado, apostou no outro — tá passando MAL no grupo agora!",
-    "É GOL! {score_side} não perdoou! {home} {h} a {a} {away}. "
+    "É GOL! {score_side} não perdoou! {score}. "
     "O {name} tá no chão — esse palpite foi pro brejo, haja coração!",
 ]
 
@@ -85,7 +88,12 @@ def _fill(template: str, label: str, h: int, a: int, leader: str = "",
           name: str = "") -> str:
     home, away = (label.split(" x ", 1) if " x " in label else (label, ""))
     score_side = home if h >= a else away
-    return template.format(home=home, away=away, h=h, a=a,
+    # winner-first score phrase; natural home-order on a draw
+    if a > h:
+        score = f"{away} {a} a {h} {home}"
+    else:
+        score = f"{home} {h} a {a} {away}"
+    return template.format(home=home, away=away, h=h, a=a, score=score,
                            score_side=score_side, leader=leader, name=name)
 
 
