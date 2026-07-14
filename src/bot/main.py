@@ -90,6 +90,22 @@ async def _answer(callback: CallbackQuery, text: str, **kwargs) -> None:
         log.info("stale callback answer dropped: %s", text)
 
 
+def _live_score_lines() -> list[str]:
+    """'França 1 x 0 Espanha (ao vivo)' from settlement state, [] outside play."""
+    if settlement is None:
+        return []
+    lines = []
+    for st in settlement._states.values():
+        if st.settled:
+            continue
+        label = store.fixture_label(st.fixture_id) or f"jogo {st.fixture_id}"
+        if " x " in label:
+            home, away = label.split(" x ", 1)
+            lines.append(f"{home} {st.home_goals or 0} x "
+                         f"{st.away_goals or 0} {away} (ao vivo)")
+    return lines
+
+
 async def _refresh_vitrine(bot: Bot, chat_id: int) -> None:
     """Auto-edited showcase pinned in the 🏆 topic: active pool, top 3, next
     kickoff, and buttons to play without ever leaving the group. Never raises."""
@@ -103,9 +119,13 @@ async def _refresh_vitrine(bot: Bot, chat_id: int) -> None:
         board = "\n".join(
             f"{medals[i]} <b>{html.escape(name)}</b> — {points} pts"
             for i, (_, name, points) in enumerate(rows[:3])) or "<i>Seja o primeiro!</i>"
+        live = _live_score_lines()
+        live_block = ("\n".join(f"🔴 <b>{html.escape(li)}</b>" for li in live)
+                      + "\n\n") if live else ""
         hint = await _next_fixture_hint()
         next_line = f"\n⏱ {html.escape(hint)}" if hint else ""
         text = (
+            f"{live_block}"
             f"🏆 <b>BOLÃO ATIVO</b>\n\n"
             f"⚽ <b>{html.escape(pool.name)}</b>\n"
             f"👥 {len(rows)} palpiteiro{'s' if len(rows) != 1 else ''} · "
@@ -214,6 +234,20 @@ def _group_app_button() -> InlineKeyboardButton | None:
     if direct:
         return InlineKeyboardButton(text="🎫 Abrir o Torcida", url=direct)
     return None
+
+
+@router.message(Command("jogo"))
+async def live_game(message: Message) -> None:
+    """Current score of live fixtures, on demand."""
+    lines = _live_score_lines()
+    if lines:
+        await message.answer("\n".join(f"🔴 <b>{html.escape(li)}</b>"
+                                       for li in lines), parse_mode="HTML")
+        return
+    hint = await _next_fixture_hint()
+    await message.answer(f"Nenhum jogo rolando agora. "
+                         f"{'⏱ ' + html.escape(hint) if hint else ''}",
+                         parse_mode="HTML")
 
 
 @router.message(Command("app"))
@@ -1068,6 +1102,7 @@ BOT_COMMANDS = [
     ("novo", "criar um bolão neste grupo"),
     ("jogos", "palpitar nos próximos jogos"),
     ("app", "abrir o app (palpites + placar)"),
+    ("jogo", "placar ao vivo do jogo"),
     ("placar", "classificação ao vivo do bolão"),
     ("meus", "seus palpites"),
     ("boloes", "seus bolões"),
