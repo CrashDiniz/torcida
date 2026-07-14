@@ -1058,7 +1058,20 @@ def _make_announcers(bot: Bot):
             if ogg:
                 await _send_voice_note(bot, [chat_id], ogg)
 
-    return on_goal, on_final
+    async def on_phase(state: FixtureState, label: str) -> None:
+        chats = store.chats_for_fixture(state.fixture_id)
+        if not chats:
+            return
+        game = await _fixture_label(state.fixture_id)
+        score = ""
+        if state.home_goals is not None and state.away_goals is not None:
+            score = f": <b>{state.home_goals} x {state.away_goals}</b>"
+        text = f"{label}\n⚽ <b>{html.escape(game)}</b>{score}"
+        for _, chat_id in chats:
+            await _send_everywhere(bot, chat_id, text)
+        log.info("phase '%s' announced for %s", label, state.fixture_id)
+
+    return on_goal, on_final, on_phase
 
 
 KICKOFF_ALERT_S = 5 * 60
@@ -1186,8 +1199,9 @@ async def main() -> None:
     dp = Dispatcher()
     dp.update.outer_middleware(_log_update)
     dp.include_router(router)
-    on_goal, on_final = _make_announcers(bot)
-    settlement = SettlementService(store, on_goal=on_goal, on_final=on_final)
+    on_goal, on_final, on_phase = _make_announcers(bot)
+    settlement = SettlementService(store, on_goal=on_goal, on_final=on_final,
+                                   on_phase=on_phase)
     scores_task = asyncio.create_task(_consume_scores(settlement))
     kickoff_task = asyncio.create_task(_kickoff_alerts(bot))
     vitrine_task = asyncio.create_task(_vitrine_loop(bot))

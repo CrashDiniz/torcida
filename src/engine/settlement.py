@@ -26,6 +26,15 @@ SOCCER_LIVE_CODES = {"h1", "ht", "h2", "et1", "htet", "et2", "pe", "wet", "wpe"}
 SOCCER_FINAL_CODES = {"f", "fet", "fpe", "end"}
 
 
+PHASE_LABELS = {
+    "ht": "🟡 Intervalo",
+    "h2": "🟢 Bola rolando — 2º tempo!",
+    "et1": "⏱ Prorrogação — 1º tempo",
+    "et2": "⏱ Prorrogação — 2º tempo",
+    "pe": "🥅 Pênaltis!",
+}
+
+
 @dataclass
 class FixtureState:
     fixture_id: int
@@ -34,6 +43,7 @@ class FixtureState:
     away_goals: int | None = None
     finished: bool = False
     settled: bool = False
+    phase: str = ""  # last StatusSoccerId code seen (h1/ht/h2/...)
 
 
 def _first(data: dict, *keys: str):
@@ -87,8 +97,8 @@ def extract_score(event: dict) -> FixtureState | None:
         # score-less event (comment, lineup) — only a live/final signal matters
         if not (finished or live):
             return None
-        return FixtureState(int(fixture_id), None, None, finished)
-    return FixtureState(int(fixture_id), home, away, finished)
+        return FixtureState(int(fixture_id), None, None, finished, phase=code)
+    return FixtureState(int(fixture_id), home, away, finished, phase=code)
 
 
 @dataclass
@@ -96,6 +106,7 @@ class SettlementService:
     store: Store
     on_goal: Callable[[FixtureState], Awaitable[None]] | None = None
     on_final: Callable[[FixtureState, int], Awaitable[None]] | None = None
+    on_phase: Callable[[FixtureState, str], Awaitable[None]] | None = None
     _states: dict[int, FixtureState] = field(default_factory=dict)
 
     async def handle_event(self, event: dict) -> None:
@@ -104,6 +115,7 @@ class SettlementService:
             return
         prev = self._states.get(parsed.fixture_id)
         current = self._states.setdefault(parsed.fixture_id, parsed)
+        prev_phase = prev.phase if prev else ""
         if prev is None:
             # sparse feeds only emit on incidents: the FIRST score event we see
             # may itself be the goal — announce a non-0x0 opening score as news
@@ -121,6 +133,12 @@ class SettlementService:
                 if goal_scored and self.on_goal:
                     await self.on_goal(current)
             current.finished = current.finished or parsed.finished
+        # phase transition (halftime, second half, ...) announced once
+        if parsed.phase and parsed.phase != prev_phase:
+            current.phase = parsed.phase
+            label = PHASE_LABELS.get(parsed.phase)
+            if label and not current.finished and self.on_phase:
+                await self.on_phase(current, label)
         if current.finished and not current.settled:
             settled = self.settle_fixture(current)
             current.settled = True

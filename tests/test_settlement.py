@@ -135,6 +135,24 @@ async def test_sparse_feed_first_event_is_the_goal(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_phase_transitions_announced_once(tmp_path):
+    store = Store(path=str(tmp_path / "s.sqlite3"))
+    phases = []
+
+    async def on_phase(state, label):
+        phases.append(label)
+
+    svc = SettlementService(store=store, on_phase=on_phase)
+    await svc.handle_event(txline_ev(700, 0, 0, status="H1"))   # no label
+    await svc.handle_event(txline_ev(700, status="HT", action="comment"))
+    await svc.handle_event(txline_ev(700, status="HT", action="comment"))  # dup
+    await svc.handle_event(txline_ev(700, 0, 0, status="H2"))
+    await svc.handle_event(txline_ev(700, 1, 0, status="F",
+                                     game_state="finished"))  # final, not phase
+    assert phases == ["🟡 Intervalo", "🟢 Bola rolando — 2º tempo!"]
+
+
+@pytest.mark.asyncio
 async def test_settlement_is_idempotent(tmp_path):
     store = Store(path=str(tmp_path / "s.sqlite3"))
     pool = store.create_pool(Pool(id=uuid.uuid4().hex, name="T", creator_id=1))
