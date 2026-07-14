@@ -117,6 +117,24 @@ async def test_goal_callback_and_final_settlement(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sparse_feed_first_event_is_the_goal(tmp_path):
+    """Incident-only feeds: first score event seen may already be 1-0."""
+    store = Store(path=str(tmp_path / "s.sqlite3"))
+    goals = []
+
+    async def on_goal(state):
+        goals.append((state.home_goals, state.away_goals))
+
+    svc = SettlementService(store=store, on_goal=on_goal)
+    await svc.handle_event(txline_ev(700, 1, 0, status="H1", action="goal"))
+    assert goals == [(1, 0)]
+    # but a plain 0-0 opener stays silent
+    svc2 = SettlementService(store=store, on_goal=on_goal)
+    await svc2.handle_event(txline_ev(701, 0, 0, status="H1"))
+    assert goals == [(1, 0)]
+
+
+@pytest.mark.asyncio
 async def test_settlement_is_idempotent(tmp_path):
     store = Store(path=str(tmp_path / "s.sqlite3"))
     pool = store.create_pool(Pool(id=uuid.uuid4().hex, name="T", creator_id=1))

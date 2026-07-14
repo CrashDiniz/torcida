@@ -42,9 +42,17 @@ txline: TxLineClient | None = None
 settlement: SettlementService | None = None
 
 
+# fixture_id -> kickoff epoch seconds (refreshed by the /fixtures sweep)
+_fixture_starts: dict[int, float] = {}
+
+
 def _fixture_started(fixture_id: int) -> bool:
-    """True once the scores stream has produced any state for the fixture."""
-    return settlement is not None and fixture_id in settlement._states
+    """True once the scores stream produced state OR API kickoff time passed
+    (sparse score feeds only emit on incidents, so time is the safety net)."""
+    if settlement is not None and fixture_id in settlement._states:
+        return True
+    start = _fixture_starts.get(fixture_id)
+    return start is not None and time.time() >= start
 
 PAYOUT_LABELS = {
     PayoutPreset.WINNER_TAKES_ALL: "🥇 Vencedor leva tudo",
@@ -1032,9 +1040,21 @@ def _make_announcers(bot: Bot):
 KICKOFF_ALERT_S = 5 * 60
 
 
+async def _send_everywhere(bot: Bot, chat_id: int, text: str) -> None:
+    """Announcements topic + general chat (Resenha) — big moments go wide."""
+    await _safe_send(bot, chat_id, text)
+    if store.chat_topic(chat_id, "anuncios") is not None:
+        try:
+            await bot.send_message(chat_id, text, parse_mode="HTML")
+        except Exception:
+            log.warning("general-chat copy to %s failed", chat_id, exc_info=True)
+
+
 async def _kickoff_alerts(bot: Bot) -> None:
-    """Warn groups holding picks ~5 min before kickoff (API time is source of truth)."""
+    """Warn groups holding picks ~5 min before kickoff and announce the start
+    (API time is source of truth)."""
     alerted: set[int] = set()
+    started: set[int] = set()
     assert txline is not None
     while True:
         try:
@@ -1043,22 +1063,33 @@ async def _kickoff_alerts(bot: Bot) -> None:
             for f in fx:
                 fid = f.get("FixtureId")
                 start_s = (f.get("StartTime") or 0) / 1000  # API sends epoch ms
-                delta = start_s - now
-                if not fid or fid in alerted or not 0 < delta <= KICKOFF_ALERT_S:
+                if not fid or not start_s:
                     continue
+                _fixture_starts[fid] = start_s  # feeds the pick lock
                 chats = store.chats_for_fixture(fid)
                 if not chats:
                     continue
-                alerted.add(fid)
                 label = await _fixture_label(fid)
-                mins = max(1, round(delta / 60))
-                text = (f"🔔 <b>Faltam ~{mins} min pro apito!</b>\n"
-                        f"⚽ <b>{html.escape(label)}</b> vai começar.\n\n"
-                        f"📳 Liga o som e as notificações — os gols saem aqui.\n"
-                        f"⛔ Palpites travam na bola rolando — última chance: /jogos")
-                for _, chat_id in chats:
-                    await _safe_send(bot, chat_id, text)
-                log.info("kickoff alert for %s sent to %d chat(s)", fid, len(chats))
+                delta = start_s - now
+                if fid not in alerted and 0 < delta <= KICKOFF_ALERT_S:
+                    alerted.add(fid)
+                    mins = max(1, round(delta / 60))
+                    text = (f"🔔 <b>Faltam ~{mins} min pro apito!</b>\n"
+                            f"⚽ <b>{html.escape(label)}</b> vai começar.\n\n"
+                            f"📳 Liga o som e as notificações — os gols saem aqui.\n"
+                            f"⛔ Palpites travam na bola rolando — última chance: /jogos")
+                    for _, chat_id in chats:
+                        await _send_everywhere(bot, chat_id, text)
+                    log.info("kickoff alert for %s sent to %d chat(s)", fid, len(chats))
+                elif fid not in started and delta <= 0 and delta > -3600 * 3:
+                    started.add(fid)
+                    text = (f"🟢 <b>BOLA ROLANDO!</b>\n"
+                            f"⚽ <b>{html.escape(label)}</b> começou.\n\n"
+                            f"⛔ Palpites travados. Gols e placar saem em 📢 — "
+                            f"segura o coração e confia na zebra 🦓")
+                    for _, chat_id in chats:
+                        await _send_everywhere(bot, chat_id, text)
+                    log.info("kickoff announced for %s in %d chat(s)", fid, len(chats))
         except Exception:
             log.warning("kickoff alert sweep failed", exc_info=True)
         await asyncio.sleep(60)

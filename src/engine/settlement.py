@@ -104,7 +104,13 @@ class SettlementService:
             return
         prev = self._states.get(parsed.fixture_id)
         current = self._states.setdefault(parsed.fixture_id, parsed)
-        if prev is not None:
+        if prev is None:
+            # sparse feeds only emit on incidents: the FIRST score event we see
+            # may itself be the goal — announce a non-0x0 opening score as news
+            if (parsed.home_goals or 0, parsed.away_goals or 0) != (0, 0) \
+                    and not parsed.finished and self.on_goal:
+                await self.on_goal(current)
+        else:
             if parsed.home_goals is not None and parsed.away_goals is not None:
                 score_known = prev.home_goals is not None
                 goal_scored = score_known and (
