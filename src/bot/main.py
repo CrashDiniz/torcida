@@ -99,18 +99,29 @@ async def _answer(callback: CallbackQuery, text: str, **kwargs) -> None:
 
 
 def _live_score_lines() -> list[str]:
-    """'França 1 x 0 Espanha (ao vivo)' from settlement state, [] outside play."""
-    if settlement is None:
-        return []
-    lines = []
-    for st in settlement._states.values():
-        if st.settled:
-            continue
-        label = store.fixture_label(st.fixture_id) or f"jogo {st.fixture_id}"
+    """'França 1 x 0 Espanha (ao vivo)' from settlement state; kicked-off
+    fixtures with a silent (incident-only) feed count as 0 x 0 live."""
+    lines, seen = [], set()
+
+    def _line(fixture_id: int, h: int, a: int) -> None:
+        label = store.fixture_label(fixture_id) or ""
         if " x " in label:
             home, away = label.split(" x ", 1)
-            lines.append(f"{home} {st.home_goals or 0} x "
-                         f"{st.away_goals or 0} {away} (ao vivo)")
+            lines.append(f"{home} {h} x {a} {away} (ao vivo)")
+            seen.add(fixture_id)
+
+    if settlement is not None:
+        for st in settlement._states.values():
+            if not st.settled and not st.finished:
+                _line(st.fixture_id, st.home_goals or 0, st.away_goals or 0)
+    now = time.time()
+    for fid, start in _fixture_starts.items():
+        started_recently = 0 <= now - start <= 3 * 3600
+        already_done = settlement is not None and (
+            st := settlement._states.get(fid)) is not None and (
+            st.finished or st.settled)
+        if fid not in seen and started_recently and not already_done:
+            _line(fid, 0, 0)
     return lines
 
 
