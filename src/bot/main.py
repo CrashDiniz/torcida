@@ -150,11 +150,26 @@ async def start_deeplink(message: Message, command: CommandObject) -> None:
     await start(message)
 
 
+def _group_app_button() -> InlineKeyboardButton | None:
+    """Direct Link Mini App opens in ONE tap from groups (needs BotFather
+    /newapp registration; set APP_DIRECT_LINK=https://t.me/<bot>/<shortname>)."""
+    direct = os.environ.get("APP_DIRECT_LINK")
+    if direct:
+        return InlineKeyboardButton(text="🎫 Abrir o Torcida", url=direct)
+    return None
+
+
 @router.message(Command("app"))
 async def open_app(message: Message) -> None:
     """Mini App entry point (web_app buttons only work in private chats)."""
     url = os.environ.get("WEBAPP_URL")
     if message.chat.type != "private":
+        direct = _group_app_button()
+        if direct:
+            await message.answer(
+                "Seu carnê de palpites e o placar ao vivo — só você vê o seu 👇",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[direct]]))
+            return
         me = await message.bot.get_me()
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
             text="🎫 Abrir no privado",
@@ -580,6 +595,19 @@ async def setup_topics(message: Message) -> None:
         parse_mode="HTML",
         message_thread_id=store.chat_topic(chat.id, "regras"),
     )
+    direct = _group_app_button()
+    if direct:
+        try:
+            pinned = await message.bot.send_message(
+                chat.id,
+                "🎫 <b>Torcida — seu carnê de palpites</b>\n"
+                "Palpita, troca e acompanha o placar. Só você vê os seus. 🤫",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[direct]]))
+            await message.bot.pin_chat_message(
+                chat.id, pinned.message_id, disable_notification=True)
+        except Exception:
+            log.warning("app pin failed in chat %s", chat.id, exc_info=True)
     await message.answer(
         "🏟 Salas prontas: 📢 Anúncios · 🏆 Bolão · ❓ Como funciona ✅")
 
