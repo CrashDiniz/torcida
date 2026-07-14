@@ -28,14 +28,18 @@ log = logging.getLogger("settlement")
 
 FINISHED_MARKERS = {"finished", "ft", "full_time", "fulltime", "ended", "final"}
 LIVE_MARKERS = {"in_running", "inrunning", "in_play", "inplay", "live"}
-# StatusSoccerId string codes from the TxLINE spec (legacy/fallback path)
 SOCCER_LIVE_CODES = {"h1", "ht", "h2", "et1", "htet", "et2", "pe", "wet", "wpe"}
 SOCCER_FINAL_CODES = {"f", "fet", "fpe", "end"}
-# numeric StatusId -> phase code (confirmed 1..4 from a full match recording)
-SOCCER_STATUS_INT = {1: "ns", 2: "h1", 3: "ht", 4: "h2"}
-# Action-stream signals for full time (GameState/StatusId can't be trusted)
-FINAL_ACTIONS = {"fulltime_finalised", "full_time_finalised", "match_finished",
-                 "fulltime", "full_time", "match_ended", "game_finished"}
+SOCCER_VOID_CODES = {"a", "c", "txcc", "txcs"}  # abandoned/cancelled/tx-cancelled
+# numeric StatusId -> phase code — CONFIRMED from the official soccer-feed doc
+# (github.com/txodds/tx-on-chain: Game Phase Encoding table)
+SOCCER_STATUS_INT = {
+    1: "ns", 2: "h1", 3: "ht", 4: "h2", 5: "f", 6: "wet", 7: "et1", 8: "htet",
+    9: "et2", 10: "fet", 11: "wpe", 12: "pe", 13: "fpe", 14: "i", 15: "a",
+    16: "c", 17: "txcc", 18: "txcs", 19: "p",
+}
+# secondary full-time signal from the Action stream (belt and suspenders)
+FINAL_ACTIONS = {"game_finalised", "fulltime_finalised", "match_finished"}
 
 
 PHASE_LABELS = {
@@ -109,7 +113,8 @@ def extract_score(event: dict) -> FixtureState | None:
     phase = SOCCER_STATUS_INT.get(status_int) or code
     state = str(_first(data, "Status", "Phase", "MatchStatus") or "").lower()
 
-    finished = (action in FINAL_ACTIONS or code in SOCCER_FINAL_CODES
+    finished = (phase in SOCCER_FINAL_CODES or code in SOCCER_FINAL_CODES
+                or action in FINAL_ACTIONS
                 or any(m in state for m in FINISHED_MARKERS))
     live = (phase in SOCCER_LIVE_CODES or code in SOCCER_LIVE_CODES
             or any(m in state for m in LIVE_MARKERS))

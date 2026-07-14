@@ -1162,7 +1162,7 @@ def _incident_message(data: dict, label: str) -> tuple[str, str] | None:
     if action == "penalty":
         who = f" para <b>{html.escape(team)}</b>" if team else ""
         return key, f"🥅 <b>PÊNALTI</b>{who}! Segura o coração… 😰"
-    if action == "penalty_outcome" and str(d.get("Outcome", "")).lower() != "scored":
+    if action == "penalty_outcome" and str(d.get("Outcome", "")).lower() == "missed":
         who = f"<b>{html.escape(team)}</b> " if team else "Alguém "
         return key, f"😱 {who}<b>PERDEU o pênalti!</b> Que isso!"
     if d.get("RedCard") or action == "red_card":

@@ -160,9 +160,35 @@ def test_extract_real_devnet_schema():
     assert s.phase == "h1" and not s.finished
     assert extract_score(real_ev(700, status_id=3)).phase == "ht"
     assert extract_score(real_ev(700, status_id=4)).phase == "h2"
+    # official Game Phase Encoding: 5=F (finished), 10=FET, 13=FPE
+    assert extract_score(real_ev(700, 1, 0, status_id=5)).finished
+    assert extract_score(real_ev(700, 2, 2, status_id=10)).finished
+    assert extract_score(real_ev(700, 3, 1, status_id=13)).finished
+    assert not extract_score(real_ev(700, 0, 0, status_id=4)).finished
     # GameState 'scheduled' must NOT read as live on its own
     bare = extract_score({"data": {"FixtureId": 9, "GameState": "scheduled"}})
     assert bare is None
+
+
+@pytest.mark.asyncio
+async def test_full_time_status5_settles(tmp_path):
+    """StatusId 5 (F) is full time — settlement must fire and pay the winner."""
+    store = Store(path=str(tmp_path / "s.sqlite3"))
+    pool = store.create_pool(Pool(id=uuid.uuid4().hex, name="T", creator_id=1))
+    store.join(pool.id, 2, "Bia")
+    store.place_pick(Pick(id="", pool_id=pool.id, user_id=2, fixture_id=700,
+                          market="1x2", selection="2", odds_decimal=3.35))
+    finals = []
+
+    async def on_final(state, n):
+        finals.append((state.home_goals, state.away_goals, n))
+
+    svc = SettlementService(store=store, on_final=on_final)
+    await svc.handle_event(real_ev(700, 0, 1, status_id=2))   # live 0-1
+    await svc.handle_event(real_ev(700, 0, 2, status_id=4))   # 0-2 H2
+    await svc.handle_event(real_ev(700, 0, 2, status_id=5))   # FULL TIME
+    assert finals == [(0, 2, 1)]
+    assert store.standings(pool.id)[0] == (2, "Bia", 335)
 
 
 @pytest.mark.asyncio
