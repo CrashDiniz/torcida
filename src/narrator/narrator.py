@@ -2,8 +2,9 @@
 
 Text: template-based (deterministic, zero deps). If DEEPSEEK_API_KEY is set,
 the line is rewritten by the LLM for extra flavour (graceful fallback).
-Voice: edge-tts neural voice, converted to OGG/Opus via ffmpeg so Telegram
-renders a proper voice note (waveform bubble).
+Voice: ElevenLabs (natural, expressive) when ELEVENLABS_API_KEY is set, else
+edge-tts. Either way converted to OGG/Opus via ffmpeg so Telegram renders a
+proper voice note. Per-event delivery: goals explode, finals are triumphant.
 """
 from __future__ import annotations
 
@@ -20,6 +21,26 @@ log = logging.getLogger("narrator")
 
 VOICE = os.environ.get("NARRATOR_VOICE", "pt-BR-AntonioNeural")
 RATE = "+12%"  # a bit faster: excited commentary
+
+# ElevenLabs: default is a public multilingual male voice ("Adam"); override
+# with a Brazilian voice from the voice library via ELEVENLABS_VOICE_ID.
+EL_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
+EL_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+# per-event expressiveness (lower stability = more emotional/varied)
+EL_STYLE = {
+    "goal": {"stability": 0.30, "similarity_boost": 0.75, "style": 0.85,
+             "use_speaker_boost": True},
+    "final": {"stability": 0.45, "similarity_boost": 0.75, "style": 0.55,
+              "use_speaker_boost": True},
+    "default": {"stability": 0.50, "similarity_boost": 0.75, "style": 0.40,
+                "use_speaker_boost": True},
+}
+# edge-tts fallback: (rate, pitch) per event so it isn't monotone either
+EDGE_STYLE = {
+    "goal": ("+28%", "+30Hz"),
+    "final": ("+6%", "+8Hz"),
+    "default": ("+12%", "+0Hz"),
+}
 
 GOAL_TEMPLATES = [
     "GOOOOOOL! {score_side} marca! {home} {h}, {away} {a}. "
@@ -78,12 +99,42 @@ async def _llm_spice(line: str) -> str:
         return line
 
 
-async def synth_voice(text: str, out_ogg: Path) -> Path:
-    """text -> mp3 (edge-tts) -> ogg/opus (ffmpeg) for Telegram voice notes."""
+async def _elevenlabs_mp3(text: str, kind: str, out_mp3: Path) -> bool:
+    """Synthesize via ElevenLabs into out_mp3. Returns False (never raises) so
+    the caller falls back to edge-tts on any missing key/quota/network issue."""
+    key = os.environ.get("ELEVENLABS_API_KEY")
+    if not key:
+        return False
+    try:
+        import httpx
+        settings = EL_STYLE.get(kind, EL_STYLE["default"])
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{EL_VOICE_ID}",
+                headers={"xi-api-key": key, "accept": "audio/mpeg"},
+                json={"text": text, "model_id": EL_MODEL,
+                      "voice_settings": settings})
+        if resp.status_code != 200:
+            log.warning("ElevenLabs %s: %s — falling back to edge-tts",
+                        resp.status_code, resp.text[:160])
+            return False
+        out_mp3.write_bytes(resp.content)
+        return True
+    except Exception:
+        log.warning("ElevenLabs call failed; falling back to edge-tts",
+                    exc_info=True)
+        return False
+
+
+async def synth_voice(text: str, out_ogg: Path, kind: str = "goal") -> Path:
+    """text -> mp3 (ElevenLabs if keyed, else edge-tts) -> ogg/opus (ffmpeg)."""
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         mp3 = Path(tmp.name)
     try:
-        await edge_tts.Communicate(text, VOICE, rate=RATE).save(str(mp3))
+        if not await _elevenlabs_mp3(text, kind, mp3):
+            rate, pitch = EDGE_STYLE.get(kind, EDGE_STYLE["default"])
+            await edge_tts.Communicate(
+                text, VOICE, rate=rate, pitch=pitch).save(str(mp3))
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-y", "-i", str(mp3), "-c:a", "libopus",
             "-b:a", "48k", "-ac", "1", str(out_ogg),
@@ -105,7 +156,7 @@ async def narrate(kind: str, label: str, h: int, a: int,
             label, h, a, leader or "o líder")
         line = await _llm_spice(line)
         out = Path(tempfile.gettempdir()) / f"torcida_{kind}_{os.getpid()}_{random.randrange(1 << 30)}.ogg"
-        return await synth_voice(line, out)
+        return await synth_voice(line, out, kind=kind)
     except Exception:
         log.warning("narration failed (%s %s)", kind, label, exc_info=True)
         return None
