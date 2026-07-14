@@ -42,33 +42,64 @@ EDGE_STYLE = {
     "default": ("+12%", "+0Hz"),
 }
 
+# PT-BR "resenha" style: elongated goal cry + a bordão + tie-in to the bolão
+# (naming the side that scored and, at full time, the leader) — the hook no
+# real broadcaster has. Research: BR fans want emotion + catchphrases.
 GOAL_TEMPLATES = [
-    "GOOOOOOL! {score_side} marca! {home} {h}, {away} {a}. "
-    "Alguém nesse bolão tá rindo à toa agora!",
-    "É GOL! Balançou a rede! {home} {h} a {a} {away}. "
-    "Confere teu palpite, porque o placar não tem dó!",
-    "GOOOOOL, meu amigo! {score_side} fez! Tá {h} a {a} no placar — "
-    "e tem gente no grupo passando mal!",
+    "GOOOOOOOL! É GOL, meu amigo, é GOL! {score_side} balançou a rede! "
+    "{home} {h}, {away} {a}. Haja coração no bolão — tem gente passando MAL agora!",
+    "OLHA O GOOOOL! {score_side} marca! {home} {h} a {a} {away}. "
+    "Anota no álbum, torcedor: esse ponto tá valendo!",
+    "É DELE, GOOOOL! {score_side} na frente! {home} {h}, {away} {a}. "
+    "Faça a sua festa quem acertou — o resto que chore no grupo!",
+    "SEGURA ESSA! GOOOL! {score_side} não perdoou! {home} {h} a {a} {away}. "
+    "O bolão pegou fogo — sai que é suuua!",
 ]
 
 FINAL_TEMPLATES = [
-    "Apita o árbitro, FIM DE JOGO! {home} {h}, {away} {a}. "
-    "Palpites liquidados — {leader} tá voando no bolão!",
-    "Acabooou! {home} {h} a {a} {away}. Foi tenso, foi lindo, "
-    "e o topo do placar agora é de {leader}!",
-    "Fim de papo! {home} {h}, {away} {a}. Pontos na conta — "
-    "e {leader} carimbando a liderança!",
+    "Apitou o juiz, ACABOU! {home} {h}, {away} {a}. "
+    "E no bolão, quem faz a festa é {leader} — esse tá voando!",
+    "É O FIM, senhoras e senhores! {home} {h} a {a} {away}. "
+    "Palpites liquidados e {leader} carimbou a liderança. O resto: tenta na próxima!",
+    "Fim de jogo! {home} {h}, {away} {a}. Pode anotar no álbum: "
+    "{leader} é quem manda nesse bolão agora. Haja coração!",
 ]
 
 
-def _fill(template: str, label: str, h: int, a: int, leader: str = "") -> str:
+# goal lines that name a real group member — the hook no broadcaster has
+GOAL_NAMED_HAPPY = [
+    "GOOOOOOL! {score_side} balançou a rede! {home} {h}, {away} {a}. "
+    "E o {name} tá PULANDO — cravou {score_side} e agora só falta a taça!",
+    "É GOL! {score_side} marca! {home} {h} a {a} {away}. "
+    "Anota aí: o {name} palpitou certinho e tá voando no bolão!",
+]
+GOAL_NAMED_SAD = [
+    "GOOOL! {score_side} na frente! {home} {h}, {away} {a}. "
+    "E o {name}, coitado, apostou no outro — tá passando MAL no grupo agora!",
+    "É GOL! {score_side} não perdoou! {home} {h} a {a} {away}. "
+    "O {name} tá no chão — esse palpite foi pro brejo, haja coração!",
+]
+
+
+def _fill(template: str, label: str, h: int, a: int, leader: str = "",
+          name: str = "") -> str:
     home, away = (label.split(" x ", 1) if " x " in label else (label, ""))
     score_side = home if h >= a else away
     return template.format(home=home, away=away, h=h, a=a,
-                           score_side=score_side, leader=leader)
+                           score_side=score_side, leader=leader, name=name)
 
 
-def goal_line(label: str, h: int, a: int) -> str:
+def goal_line(label: str, h: int, a: int,
+              happy: list[str] | None = None,
+              sad: list[str] | None = None) -> str:
+    """Name a group member when we know who picked the (currently) leading side;
+    happy = picked the side ahead, sad = picked against. Falls back to generic."""
+    if happy:
+        return _fill(random.choice(GOAL_NAMED_HAPPY), label, h, a,
+                     name=random.choice(happy))
+    if sad:
+        return _fill(random.choice(GOAL_NAMED_SAD), label, h, a,
+                     name=random.choice(sad))
     return _fill(random.choice(GOAL_TEMPLATES), label, h, a)
 
 
@@ -147,13 +178,15 @@ async def synth_voice(text: str, out_ogg: Path, kind: str = "goal") -> Path:
 
 
 async def narrate(kind: str, label: str, h: int, a: int,
-                  leader: str = "") -> Path | None:
-    """Full pipeline; returns path to .ogg voice note or None on failure."""
+                  leader: str = "", happy: list[str] | None = None,
+                  sad: list[str] | None = None) -> Path | None:
+    """Full pipeline; returns path to .ogg voice note or None on failure.
+    happy/sad = group members who picked the leading/trailing side (goal only)."""
     if os.environ.get("TORCIDA_NARRATOR", "1") == "0":
         return None
     try:
-        line = goal_line(label, h, a) if kind == "goal" else final_line(
-            label, h, a, leader or "o líder")
+        line = (goal_line(label, h, a, happy=happy, sad=sad) if kind == "goal"
+                else final_line(label, h, a, leader or "o líder"))
         line = await _llm_spice(line)
         out = Path(tempfile.gettempdir()) / f"torcida_{kind}_{os.getpid()}_{random.randrange(1 << 30)}.ogg"
         return await synth_voice(line, out, kind=kind)

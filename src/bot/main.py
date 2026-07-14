@@ -1031,8 +1031,15 @@ def _make_announcers(bot: Bot):
                 f"<b>{state.home_goals} x {state.away_goals}</b>")
         for _, chat_id in chats:
             await _safe_send(bot, chat_id, text)
-        ogg = await narrate("goal", label, state.home_goals or 0,
-                            state.away_goals or 0)
+        # who in the group is happy/sad? name them in the narration
+        h, a = state.home_goals or 0, state.away_goals or 0
+        happy, sad = [], []
+        if h != a:
+            leading = "1" if h > a else "2"
+            for name, sel in store.named_picks_for_fixture(state.fixture_id):
+                (happy if sel == leading else sad).append(name)
+        ogg = await narrate("goal", label, h, a, happy=happy or None,
+                            sad=sad or None)
         if ogg:
             await _send_voice_note(bot, [c for _, c in chats], ogg)
 

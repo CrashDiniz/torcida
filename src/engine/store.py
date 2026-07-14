@@ -255,6 +255,19 @@ class Store:
             ).fetchall()
         return [self._pick(r) for r in rows]
 
+    def named_picks_for_fixture(self, fixture_id: int) -> list[tuple[str, str]]:
+        """[(display_name, selection)] of open picks on a fixture, for the
+        narrator to name who's happy/sad in the group."""
+        with self._conn() as c:
+            rows = c.execute(
+                """SELECT e.display_name AS name, p.selection AS selection
+                   FROM picks p JOIN entries e
+                     ON e.pool_id = p.pool_id AND e.user_id = p.user_id
+                   WHERE p.fixture_id=? AND p.status='open'""",
+                (fixture_id,),
+            ).fetchall()
+        return [(r["name"], r["selection"]) for r in rows]
+
     def open_fixture_ids(self) -> list[int]:
         """Distinct fixtures that still have open picks (need settlement)."""
         with self._conn() as c:
