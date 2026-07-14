@@ -412,3 +412,11 @@ load();
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     return PAGE
+
+
+@app.get("/landing", response_class=HTMLResponse)
+async def landing() -> str:
+    """torcida.app landing preview (deployed as static site on D4)."""
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[2] / "landing" / "index.html"
+    return page.read_text(encoding="utf-8")
