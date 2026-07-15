@@ -7,11 +7,18 @@ Vercel as a separate static site.
 ## 1. Railway (needs Crash login)
 
 1. https://railway.app → New Project → Deploy from GitHub → `CrashDiniz/torcida`
-2. Variables (Settings → Variables):
-   - `TELEGRAM_BOT_TOKEN` — from app/.env
-   - `TXLINE_BASE_URL`, `TXLINE_API_TOKEN` — from app/.env
-   - `WEBAPP_URL=https://app.torcida.app` (after DNS below)
+2. Variables (Settings → Variables) — names MUST match what the code reads
+   (`grep -rn os.environ src/`); the old `TXLINE_BASE_URL` was wrong:
+   - `TELEGRAM_BOT_TOKEN` — from app/.env (required; app crashes without it)
+   - `TXLINE_API_TOKEN` — from app/.env (required)
+   - `TXLINE_API_BASE` — from app/.env (World Cup base; defaults wrong if unset)
+   - `TXLINE_JWT` — from app/.env (guest JWT; optional but set it)
+   - `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` — from app/.env (voice; falls
+     back to edge-tts if absent, so app still runs without them)
+   - `APP_DIRECT_LINK=https://t.me/torcidaapp_bot/app` (fixed, from app/.env)
+   - `WEBAPP_URL=https://app.torcida.app` (after DNS below; optional at boot)
    - `DATABASE_PATH=/data/app.sqlite3`
+   - Optional: `DEEPSEEK_API_KEY` (unpredictable narration text; edge/EL work without)
 3. Add a Volume mounted at `/data` (sqlite must survive redeploys).
 4. Settings → Networking → Generate Domain → note `<svc>.up.railway.app`.
 
