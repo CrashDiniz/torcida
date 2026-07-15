@@ -21,7 +21,8 @@ from src.engine.models import (PayoutPreset, Pick, PickStatus, Pool,
                                RequestStatus, Visibility)
 from src.engine.odds import parse_snapshot
 from src.engine.scoring import points_for
-from src.engine.settlement import PHASE_LABELS, extract_score
+from src.engine.settlement import snapshot_score
+from src.engine.teams import pt
 from src.engine.store import Store
 from src.ingest.txline import TxLineClient
 
@@ -71,10 +72,16 @@ async def _fixtures() -> list:
     return fx
 
 
+# TEST MODE: picks stay open for a grace window AFTER kickoff (set via env so
+# it can be flipped without a code change). 0 = lock exactly at kickoff.
+PICK_GRACE_S = int(os.environ.get("PICK_GRACE_S", "0"))
+
+
 def fixture_locked(fixture: dict, now: float | None = None) -> bool:
-    """Kickoff lock by API start time (ms epoch) — source of truth for the app."""
+    """Kickoff lock by API start time (ms epoch) — source of truth for the app.
+    Picks stay open until kickoff + PICK_GRACE_S (test-mode grace)."""
     start_s = (fixture.get("StartTime") or 0) / 1000
-    return start_s <= (now or time.time())
+    return start_s + PICK_GRACE_S <= (now or time.time())
 
 
 def _auth(init_data: str) -> dict | None:
@@ -116,7 +123,7 @@ async def _state_payload(uid: int, first_name: str) -> dict:
                           "emoji": emoji, "status": status})
         fixtures = []
         for f in upcoming:
-            home, away = f.get("Participant1", "?"), f.get("Participant2", "?")
+            home, away = pt(f.get("Participant1", "?")), pt(f.get("Participant2", "?"))
             fixtures.append({
                 "fixture_id": f["FixtureId"], "home": home, "away": away,
                 "locked": fixture_locked(f),
@@ -188,7 +195,7 @@ async def place_pick(req: PickRequest):
     # odds are fetched NOW, server-side — immune to stale cards
     odds = parse_snapshot(await txline.odds_snapshot(req.fixture_id))
     value = {"1": odds.home, "X": odds.draw, "2": odds.away}[req.selection]
-    label = f"{fixture.get('Participant1', '?')} x {fixture.get('Participant2', '?')}"
+    label = f"{pt(fixture.get('Participant1', '?'))} x {pt(fixture.get('Participant2', '?'))}"
     store.set_fixture_label(req.fixture_id, label)
 
     import uuid as _uuid
@@ -358,6 +365,9 @@ SPORTS_TABS = [
     {"id": "basket", "label": "🏀 Basquete", "active": False},
     {"id": "nfl", "label": "🏈 NFL", "active": False},
 ]
+# board phase caption (no "ao vivo" here — the board already has a LIVE badge)
+BOARD_PHASE = {"h1": "1º tempo", "ht": "intervalo", "h2": "2º tempo",
+               "et1": "prorrogação", "et2": "prorrogação", "pe": "pênaltis"}
 
 
 async def _live_payload() -> dict:
@@ -374,11 +384,15 @@ async def _live_payload() -> dict:
         if (f.get("StartTime") or 0) / 1000 > now:
             continue  # not kicked off yet
         try:
-            state = extract_score(await txline.scores_snapshot(f["FixtureId"]))
+            sc = snapshot_score(await txline.scores_snapshot(f["FixtureId"]))
         except Exception:
-            state = None
-        if state is None or state.finished or state.phase not in LIVE_PHASES:
-            continue
+            sc = None
+        if sc is not None and sc[3]:
+            continue  # already ended
+        # kicked off and not finished -> live. The score feed is sparse (only
+        # emits on incidents), so it may not carry an in-play phase yet at
+        # kickoff; time-since-kickoff is the signal, same as the bot.
+        hs, aw, phase_code = (sc[0], sc[1], sc[2]) if sc else (0, 0, "")
         odds = None
         try:
             od = parse_snapshot(await txline.odds_snapshot(f["FixtureId"]))
@@ -387,16 +401,16 @@ async def _live_payload() -> dict:
         except Exception:
             pass
         live.append({
-            "home": f.get("Participant1", "?"), "away": f.get("Participant2", "?"),
-            "hs": state.home_goals or 0, "as": state.away_goals or 0,
-            "phase": PHASE_LABELS.get(state.phase, "🔴 Ao vivo"), "odds": odds,
+            "home": pt(f.get("Participant1", "?")), "away": pt(f.get("Participant2", "?")),
+            "hs": hs, "as": aw,
+            "phase": BOARD_PHASE.get(phase_code, "em jogo"), "odds": odds,
         })
     nxt = None
     if not live:
         upcoming = [f for f in await _fixtures() if (f.get("StartTime") or 0) / 1000 > now]
         if upcoming:
             nf = min(upcoming, key=lambda f: f.get("StartTime") or 0)
-            nxt = f"{nf.get('Participant1', '?')} x {nf.get('Participant2', '?')}"
+            nxt = f"{pt(nf.get('Participant1', '?'))} x {pt(nf.get('Participant2', '?'))}"
     payload = {"sports": SPORTS_TABS, "soccer": {"live": live, "next": nxt}}
     _live_cache = (time.time(), payload)
     return payload

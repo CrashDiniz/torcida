@@ -27,6 +27,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message, WebAppInfo)
 
 from ..engine.models import PayoutPreset, Pick, PickStatus, Pool, Visibility
+from ..engine.teams import pt
 from ..engine.odds import parse_snapshot
 from ..engine.scoring import points_for
 from ..engine.settlement import FixtureState, SettlementService
@@ -53,6 +54,27 @@ def _fixture_started(fixture_id: int) -> bool:
         return True
     start = _fixture_starts.get(fixture_id)
     return start is not None and time.time() >= start
+
+
+def _pick_grace_s() -> int:
+    """TEST MODE grace window (seconds) picks stay open after kickoff. Read at
+    call time — the bot loads .env inside main(), after import."""
+    try:
+        return int(os.environ.get("PICK_GRACE_S", "0"))
+    except ValueError:
+        return 0
+
+
+def _picks_locked(fixture_id: int) -> bool:
+    """Whether new/changed picks are locked for a fixture. Time-based with a
+    grace window so test games can stay open after kickoff."""
+    grace = _pick_grace_s()
+    start = _fixture_starts.get(fixture_id)
+    if start is None:
+        # unknown kickoff: keep open while a grace window is set (test mode),
+        # otherwise fall back to the started signal
+        return False if grace > 0 else _fixture_started(fixture_id)
+    return time.time() >= start + grace
 
 PAYOUT_LABELS = {
     PayoutPreset.WINNER_TAKES_ALL: "🥇 Vencedor leva tudo",
@@ -216,7 +238,7 @@ async def _fixture_label(fixture_id: int) -> str:
         for f in fx:
             if f.get("FixtureId") and f.get("Participant1"):
                 store.set_fixture_label(
-                    f["FixtureId"], f"{f['Participant1']} x {f['Participant2']}")
+                    f["FixtureId"], f"{pt(f['Participant1'])} x {pt(f['Participant2'])}")
     except Exception:
         log.warning("fixture label lookup failed for %s", fixture_id, exc_info=True)
     return store.fixture_label(fixture_id) or f"Jogo #{fixture_id}"
@@ -521,7 +543,7 @@ async def _send_fixture_cards(message: Message, pool: Pool, user_id: int,
         return
     for f in upcoming:
         odds = parse_snapshot(await txline.odds_snapshot(f["FixtureId"]))
-        home, away = f.get("Participant1", "?"), f.get("Participant2", "?")
+        home, away = pt(f.get("Participant1", "?")), pt(f.get("Participant2", "?"))
         fixture_label = f"{home} x {away}"
         store.set_fixture_label(f["FixtureId"], fixture_label)
         if not odds.live:
@@ -581,7 +603,7 @@ async def place_pick(callback: CallbackQuery) -> None:
                       "♻️ Esse card é de um bolão antigo — manda /jogos "
                       "pra palpitar no atual!", show_alert=True)
         return
-    if _fixture_started(int(fixture_id)):
+    if _picks_locked(int(fixture_id)):
         await _answer(callback, "⛔ Bola rolando — palpites travados pra esse jogo!",
                       show_alert=True)
         return
@@ -935,7 +957,7 @@ async def _next_fixture_hint() -> str | None:
         hours = (start - now) / 3600
         when = (f"em ~{hours / 24:.0f} dias" if hours >= 48
                 else f"em ~{max(1, round(hours))}h")
-        return f"{f['Participant1']} x {f['Participant2']} começa {when}"
+        return f"{pt(f['Participant1'])} x {pt(f['Participant2'])} começa {when}"
     except Exception:
         return None
 
@@ -1086,14 +1108,22 @@ async def _send_voice_note(bot: Bot, chat_ids: list[int], ogg) -> None:
             log.warning("voice note to chat %s failed", chat_id, exc_info=True)
 
 
+def _score_between(label: str, h: int, a: int) -> str:
+    """'Inglaterra <b>0 x 0</b> Argentina' — score sits between the team names."""
+    if " x " in label:
+        home, away = label.split(" x ", 1)
+        return f"{html.escape(home)} <b>{h} x {a}</b> {html.escape(away)}"
+    return f"<b>{html.escape(label)}</b> — {h} x {a}"
+
+
 def _make_announcers(bot: Bot):
     async def on_goal(state: FixtureState) -> None:
         chats = store.chats_for_fixture(state.fixture_id)
         if not chats:
             return
         label = await _fixture_label(state.fixture_id)
-        text = (f"⚽ <b>GOOOL!</b>\n{html.escape(label)}: "
-                f"<b>{state.home_goals} x {state.away_goals}</b>")
+        text = (f"⚽ <b>GOOOL!</b>\n"
+                f"{_score_between(label, state.home_goals or 0, state.away_goals or 0)}")
         for _, chat_id in chats:
             await _safe_send(bot, chat_id, text)
         # who in the group is happy/sad? name them in the narration
@@ -1125,12 +1155,14 @@ def _make_announcers(bot: Bot):
                         f"{PAYOUT_LABELS[pool.payout_preset]}\n" if has_pot else "")
             await _safe_send(
                 bot, chat_id,
-                f"🏁 <b>Fim de jogo!</b>\n{html.escape(label)}: "
-                f"<b>{home} x {away}</b>\n\n"
+                f"🏁 <b>Fim de jogo!</b>\n{_score_between(label, home, away)}\n\n"
                 f"Palpites liquidados. 📊 <b>{html.escape(pool.name)}</b>:{pot_line}\n"
                 f"{board}")
-            ogg = await narrate("final", label, home, away,
-                                leader=rows[0][1] if rows else "")
+            ogg = await narrate(
+                "final", label, home, away,
+                leader=split[0][1] if split else "",
+                standings=[(name, pts, chips) for _, name, pts, chips in split],
+                pot=store.pot_for(pool_id) if has_pot else 0)
             if ogg:
                 await _send_voice_note(bot, [chat_id], ogg)
 
@@ -1139,10 +1171,11 @@ def _make_announcers(bot: Bot):
         if not chats:
             return
         game = await _fixture_label(state.fixture_id)
-        score = ""
         if state.home_goals is not None and state.away_goals is not None:
-            score = f": <b>{state.home_goals} x {state.away_goals}</b>"
-        text = f"{label}\n⚽ <b>{html.escape(game)}</b>{score}"
+            board = _score_between(game, state.home_goals, state.away_goals)
+        else:
+            board = f"<b>{html.escape(game)}</b>"
+        text = f"{label}\n⚽ {board}"
         for _, chat_id in chats:
             await _send_everywhere(bot, chat_id, text)
         log.info("phase '%s' announced for %s", label, state.fixture_id)

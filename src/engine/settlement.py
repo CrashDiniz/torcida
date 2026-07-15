@@ -126,6 +126,27 @@ def extract_score(event: dict) -> FixtureState | None:
     return FixtureState(int(fixture_id), home, away, finished, phase=phase)
 
 
+def snapshot_score(items: list) -> tuple[int, int, str, bool] | None:
+    """Best current (home, away, phase, finished) from a /scores/snapshot list.
+    The snapshot is a list of event records; prefer the authoritative
+    game_finalised record, else the highest-Seq event that carries a score."""
+    final = None
+    best_seq, best = -1, None
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        parsed = extract_score({"data": it})
+        if parsed is None or parsed.home_goals is None:
+            continue
+        state = (parsed.home_goals, parsed.away_goals, parsed.phase, parsed.finished)
+        if str(it.get("Action", "")).lower() == "game_finalised" or parsed.finished:
+            final = (parsed.home_goals, parsed.away_goals, parsed.phase, True)
+        seq = it.get("Seq") or 0
+        if seq >= best_seq:
+            best_seq, best = seq, state
+    return final or best
+
+
 @dataclass
 class SettlementService:
     store: Store

@@ -111,8 +111,18 @@ def goal_line(label: str, h: int, a: int,
     return _fill(random.choice(GOAL_TEMPLATES), label, h, a)
 
 
-def final_line(label: str, h: int, a: int, leader: str) -> str:
-    return _fill(random.choice(FINAL_TEMPLATES), label, h, a, leader)
+def final_line(label: str, h: int, a: int, leader: str,
+               standings: list[tuple[str, int, int]] | None = None,
+               pot: int = 0) -> str:
+    if not standings:
+        return _fill(random.choice(FINAL_TEMPLATES), label, h, a, leader)
+    score = _fill("{score}", label, h, a)
+    champ, champ_pts, _ = standings[0]
+    pot_txt = f", levando o pote de {pot} fichas" if pot else ""
+    board = "; ".join(f"{n} com {p} pontos" for n, p, _ in standings[:3])
+    return (f"Apitou o juiz, o bolão fechou! {score}. "
+            f"O grande campeão é {champ}, com {champ_pts} pontos{pot_txt}! "
+            f"A classificação final: {board}.")
 
 
 async def _llm_spice(line: str) -> str:
@@ -126,16 +136,31 @@ async def _llm_spice(line: str) -> str:
         resp = await asyncio.wait_for(client.chat.completions.create(
             model="deepseek-chat",
             messages=[{"role": "system", "content":
-                       "Você é um narrador de futebol brasileiro carismático e "
-                       "zoeiro. Reescreva a frase mantendo placar e nomes EXATOS, "
-                       "em 1-2 frases faladas, sem emojis."},
+                       "Você é um narrador de futebol brasileiro carismático, "
+                       "estilo resenha de bar. Reescreva a frase pra soar NATURAL "
+                       "FALADA (vira áudio), mantendo os NOMES exatos e o resultado "
+                       "correto. Ao dizer o placar, use a forma falada do português "
+                       "— ex: '2 para a Argentina e 1 para a Inglaterra' ou 'a "
+                       "Argentina marca o segundo' — NUNCA '2 a 1' seco nem 'x'. "
+                       "Coloque tags de emoção entre colchetes no meio do texto (são "
+                       "do sintetizador de voz): comece o grito de gol com [shouting], "
+                       "use [excited] na parte animada e [happy] ao citar quem está "
+                       "ganhando. 1 a 2 frases curtas, com energia, sem emojis, sem "
+                       "asteriscos, sem markdown."},
                       {"role": "user", "content": line}],
-            max_tokens=120), timeout=8)
+            max_tokens=140, temperature=1.0), timeout=10)
         text = (resp.choices[0].message.content or "").strip()
         return text or line
     except Exception:
         log.warning("LLM spice failed; using template line", exc_info=True)
         return line
+
+
+def _strip_audio_tags(text: str) -> str:
+    """Drop [emotion] tags — only ElevenLabs v3 understands them; edge-tts and
+    the v2 model would read them out loud."""
+    import re
+    return re.sub(r"\s*\[[^\]]*\]\s*", " ", text).strip()
 
 
 async def _elevenlabs_mp3(text: str, kind: str, out_mp3: Path) -> bool:
@@ -146,12 +171,18 @@ async def _elevenlabs_mp3(text: str, kind: str, out_mp3: Path) -> bool:
         return False
     try:
         import httpx
+        # read at call time: the bot loads .env inside main(), after this
+        # module is imported, so module-level constants would be stale
+        voice_id = os.environ.get("ELEVENLABS_VOICE_ID", EL_VOICE_ID)
+        model = os.environ.get("ELEVENLABS_MODEL", EL_MODEL)
+        if "v3" not in model:  # only v3 parses [emotion] tags
+            text = _strip_audio_tags(text)
         settings = EL_STYLE.get(kind, EL_STYLE["default"])
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{EL_VOICE_ID}",
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
                 headers={"xi-api-key": key, "accept": "audio/mpeg"},
-                json={"text": text, "model_id": EL_MODEL,
+                json={"text": text, "model_id": model,
                       "voice_settings": settings})
         if resp.status_code != 200:
             log.warning("ElevenLabs %s: %s — falling back to edge-tts",
@@ -173,7 +204,7 @@ async def synth_voice(text: str, out_ogg: Path, kind: str = "goal") -> Path:
         if not await _elevenlabs_mp3(text, kind, mp3):
             rate, pitch = EDGE_STYLE.get(kind, EDGE_STYLE["default"])
             await edge_tts.Communicate(
-                text, VOICE, rate=rate, pitch=pitch).save(str(mp3))
+                _strip_audio_tags(text), VOICE, rate=rate, pitch=pitch).save(str(mp3))
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-y", "-i", str(mp3), "-c:a", "libopus",
             "-b:a", "48k", "-ac", "1", str(out_ogg),
@@ -187,14 +218,18 @@ async def synth_voice(text: str, out_ogg: Path, kind: str = "goal") -> Path:
 
 async def narrate(kind: str, label: str, h: int, a: int,
                   leader: str = "", happy: list[str] | None = None,
-                  sad: list[str] | None = None) -> Path | None:
+                  sad: list[str] | None = None,
+                  standings: list[tuple[str, int, int]] | None = None,
+                  pot: int = 0) -> Path | None:
     """Full pipeline; returns path to .ogg voice note or None on failure.
-    happy/sad = group members who picked the leading/trailing side (goal only)."""
+    happy/sad = members who picked the leading/trailing side (goal only).
+    standings = [(name, points, chips)] top-first + pot = full-time payout call."""
     if os.environ.get("TORCIDA_NARRATOR", "1") == "0":
         return None
     try:
         line = (goal_line(label, h, a, happy=happy, sad=sad) if kind == "goal"
-                else final_line(label, h, a, leader or "o líder"))
+                else final_line(label, h, a, leader or "o líder",
+                                standings=standings, pot=pot))
         line = await _llm_spice(line)
         out = Path(tempfile.gettempdir()) / f"torcida_{kind}_{os.getpid()}_{random.randrange(1 << 30)}.ogg"
         return await synth_voice(line, out, kind=kind)
