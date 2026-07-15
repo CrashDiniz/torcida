@@ -7,6 +7,7 @@ server-side (no stale card odds) and lock at kickoff (API StartTime).
 """
 from __future__ import annotations
 
+import html
 import os
 import time
 import uuid
@@ -39,10 +40,12 @@ PAYOUT_LABELS = {
     PayoutPreset.POKER: "🃏 Top 20% (estilo poker)",
 }
 PAYOUT_OPTIONS = [(p.value, PAYOUT_LABELS[p]) for p in PayoutPreset]
+# app-created pools are always discoverable — the app has no surface to share
+# an invite link, so a hidden pool would be a dead end. Private/link-only pools
+# are born in the group via /novo instead.
 VISIBILITY_OPTIONS = [
     (Visibility.PUBLIC.value, "🔓 Livre — qualquer um entra"),
     (Visibility.REQUEST.value, "🙋 Sob pedido — você aprova quem entra"),
-    (Visibility.HIDDEN.value, "🔒 Só por convite — fora da vitrine"),
 ]
 
 _fixtures_cache: tuple[float, list] = (0.0, [])
@@ -256,6 +259,8 @@ async def create_pool(req: CreateRequest):
         preset = PayoutPreset(req.payout_preset)
     except ValueError:
         return JSONResponse({"error": "option"}, status_code=400)
+    if visibility == Visibility.HIDDEN:  # app can't share an invite link
+        return JSONResponse({"error": "hidden_unsupported"}, status_code=400)
     buy_in = max(0, min(int(req.buy_in), 1_000_000))
     uid = int(user["id"])
     pool = Pool(id=uuid.uuid4().hex, name=name, creator_id=uid,
@@ -289,8 +294,9 @@ async def _notify_creator(creator_id: int, requester: str, pool_name: str) -> No
     if not token:
         return
     import httpx
-    text = (f"🙋 <b>{requester}</b> quer entrar no seu bolão "
-            f"<b>{pool_name}</b>.\nAbra o Torcida e aprove na aba 🎫 Meus bolões.")
+    text = (f"🙋 <b>{html.escape(requester)}</b> quer entrar no seu bolão "
+            f"<b>{html.escape(pool_name)}</b>.\n"
+            f"Abra o Torcida e aprove na aba 🎫 Meus bolões.")
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             await client.post(
@@ -628,7 +634,7 @@ function renderMine() {
           ${pool.pot ? `<td class="chips">${r.chips} 🪙</td>` : ''}
           <td class="pts">${r.points}</td></tr>`).join('')}
       </table>
-      <button class="leave" onclick="leavePool('${pool.id}', '${esc(pool.name)}')">
+      <button class="leave" onclick="leavePool('${pool.id}')">
         🚪 Sair de ${esc(pool.name)}</button>
     </section>`).join('');
 }
@@ -752,7 +758,9 @@ async function pick(pi, poolId, fixtureId, sel) {
   if (st.ok) { state = st.data; render(); }
 }
 
-function leavePool(poolId, name) {
+function leavePool(poolId) {
+  const pool = state.pools.find(p => p.id === poolId);
+  const name = pool ? pool.name : 'este bolão';
   const doLeave = async (okPressed) => {
     if (!okPressed) return;
     const res = await api('/api/leave', {pool_id: poolId});

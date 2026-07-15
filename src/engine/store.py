@@ -88,13 +88,22 @@ class Store:
     def _migrate(c: sqlite3.Connection) -> None:
         """Add columns introduced after a DB was first created. ALTER TABLE
         ADD COLUMN is metadata-only in sqlite (no row rewrite) — safe on a live
-        DB. Idempotent: only adds what's missing."""
-        cols = {r["name"] for r in c.execute("PRAGMA table_info(pools)")}
-        if "buy_in" not in cols:
-            c.execute("ALTER TABLE pools ADD COLUMN buy_in INTEGER NOT NULL DEFAULT 0")
-        if "visibility" not in cols:
-            c.execute("ALTER TABLE pools ADD COLUMN "
-                      "visibility TEXT NOT NULL DEFAULT 'hidden'")
+        DB. Idempotent: only adds what's missing, and tolerates a concurrent
+        process (bot + web start together) winning the race — a duplicate-column
+        error just means the other process already added it."""
+        def add_column(ddl: str, name: str) -> None:
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(pools)")}
+            if name in cols:
+                return
+            try:
+                c.execute(ddl)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
+        add_column("ALTER TABLE pools ADD COLUMN buy_in INTEGER NOT NULL DEFAULT 0",
+                   "buy_in")
+        add_column("ALTER TABLE pools ADD COLUMN visibility TEXT NOT NULL "
+                   "DEFAULT 'hidden'", "visibility")
 
     @contextmanager
     def _conn(self):

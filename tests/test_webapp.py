@@ -93,6 +93,16 @@ def test_discover_join_and_pot_flow(monkeypatch, tmp_path):
     assert d2["my_status"] == "member" and d2["pot"] == 200  # Bia joined -> 2 x 100
 
 
+def test_create_rejects_hidden(monkeypatch, tmp_path):
+    # app has no surface to share an invite link, so hidden pools are refused
+    c = _client(monkeypatch, tmp_path)
+    r = c.post("/api/create", json={"initData": _fresh_init(1), "name": "Secreto",
+                                    "visibility": "hidden", "buy_in": 0,
+                                    "payout_preset": "top3"})
+    assert r.status_code == 400
+    assert c.post("/api/discover", json={"initData": _fresh_init(1)}).json()["pools"] == []
+
+
 def test_request_and_approval_flow(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     ana, ze, mal = _fresh_init(1, "Ana"), _fresh_init(3, "Zé"), _fresh_init(9, "Mal")

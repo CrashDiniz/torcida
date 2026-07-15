@@ -319,10 +319,9 @@ async def start(message: Message) -> None:
 
 async def _create_pool(message: Message, name: str,
                        creator_id: int, creator_name: str) -> None:
-    # group pools are public by default: they show up on the app's Descobrir
-    # tab so friends (and externos via link/site) can find and join them
-    pool = Pool(id=uuid.uuid4().hex, name=name, creator_id=creator_id,
-                visibility=Visibility.PUBLIC)
+    # starts private (link-only); the creation flow lets the host open it to
+    # the showcase (public / request) in the visibility step below
+    pool = Pool(id=uuid.uuid4().hex, name=name, creator_id=creator_id)
     store.create_pool(pool, telegram_chat_id=message.chat.id)
     store.join(pool.id, creator_id, creator_name)
     _register_chat_pool(message.chat.id, pool)
@@ -427,6 +426,40 @@ async def choose_buyin(callback: CallbackQuery) -> None:
         c.execute("UPDATE pools SET buy_in=? WHERE id=?", (int(amount), pool_id))
     await callback.message.edit_reply_markup(reply_markup=None)
     tag = "Grátis (joga por pontos)" if int(amount) == 0 else f"{amount} 🪙 por cabeça"
+    visib_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=label, callback_data=f"visib:{pool_id}:{v}")]
+        for v, label in VISIBILITY_OPTIONS
+    ])
+    await callback.message.answer(
+        f"Entrada: {tag} ✅\n"
+        f"Quem pode entrar? <i>(bolões abertos aparecem na vitrine do app pra "
+        f"amigos e externos acharem)</i>",
+        parse_mode="HTML", reply_markup=visib_kb)
+    await _answer(callback, "")
+
+
+VISIBILITY_OPTIONS = [
+    (Visibility.PUBLIC.value, "🔓 Aberto — qualquer um entra"),
+    (Visibility.REQUEST.value, "🙋 Sob pedido — você aprova"),
+    (Visibility.HIDDEN.value, "🔒 Fechado — só neste grupo / por link"),
+]
+
+
+@router.callback_query(F.data.startswith("visib:"))
+async def choose_visibility(callback: CallbackQuery) -> None:
+    _, pool_id, value = callback.data.split(":")
+    pool = store.pool_by_id(pool_id)
+    if pool is None or callback.from_user.id != pool.creator_id:
+        await _answer(callback, "Só quem criou o bolão define quem entra 😉")
+        return
+    visibility = Visibility(value)
+    with store._conn() as c:  # MVP: direct update
+        c.execute("UPDATE pools SET visibility=? WHERE id=?",
+                  (visibility.value, pool_id))
+    await callback.message.edit_reply_markup(reply_markup=None)
+    tag = {Visibility.PUBLIC: "🔓 Aberto na vitrine",
+           Visibility.REQUEST: "🙋 Sob pedido",
+           Visibility.HIDDEN: "🔒 Fechado (só por link)"}[visibility]
     theme_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=e, callback_data=f"theme:{pool_id}:{e}")
          for e in THEME_EMOJIS[:4]],
@@ -434,8 +467,8 @@ async def choose_buyin(callback: CallbackQuery) -> None:
          for e in THEME_EMOJIS[4:]],
     ])
     await callback.message.answer(
-        f"Entrada: {tag} ✅\n"
-        f"Agora escolhe o tema — ele identifica o bolão em tudo:",
+        f"Entrada de quem entra: {tag} ✅\n"
+        f"Por último, o tema — ele identifica o bolão em tudo:",
         reply_markup=theme_kb)
     await _answer(callback, "")
 
