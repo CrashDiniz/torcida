@@ -43,11 +43,19 @@
     background: repeating-linear-gradient(90deg, var(--green) 0 5px, var(--green-dk) 5px 10px);
   }
   nav .name { font-size: 20px; letter-spacing: 3px; }
+  nav .navright { display: flex; align-items: center; gap: 14px; }
   nav a.cta {
     background: var(--stamp); color: #fff; text-decoration: none;
     padding: 8px 18px; border-radius: 4px; font-size: 15px; letter-spacing: 1px;
     box-shadow: 2px 2px 0 rgba(0,0,0,.35);
   }
+  .lang { display: flex; gap: 3px; }
+  .langbtn {
+    background: transparent; color: var(--paper); border: 1px solid var(--gold);
+    padding: 4px 9px; font-size: 12px; letter-spacing: 1px; cursor: pointer;
+    border-radius: 3px; font-family: 'Graduate', serif; opacity: .55; line-height: 1;
+  }
+  .langbtn.on { background: var(--gold); color: var(--green-dk); opacity: 1; }
 
   /* ---------- hero ---------- */
   .hero { max-width: 960px; margin: 0 auto; padding: 64px 24px 48px; text-align: center; }
@@ -155,103 +163,121 @@
       <div class="name display">TORCIDA</div>
     </div>
   </div>
-  <a class="cta display" href="https://t.me/torcidaapp_bot">Abrir no Telegram</a>
+  <div class="navright">
+    <div class="lang" role="group" aria-label="Language">
+      <button class="langbtn" data-lang="pt" type="button">PT</button>
+      <button class="langbtn" data-lang="en" type="button">EN</button>
+    </div>
+    <a class="cta display" href="https://t.me/+B0SVEoGVrnxlYWFh"
+       data-en="Join the group">Entrar no grupo</a>
+  </div>
 </nav>
 
 <div class="hero">
-  <div class="est display">★ Associação de Palpiteiros · Fundada na Copa ★</div>
-  <h1 class="display">O bolão da resenha,<br>com <em>odds de verdade</em>.</h1>
-  <p class="sub">Palpite no grupo dos amigos, direto no Telegram. Acertou o favorito,
-     pontua. Acertou a <strong>zebra</strong>, pontua MUITO. Gol sai, o grupo fica sabendo
-     na hora — e o placar não perdoa ninguém.</p>
+  <div class="est display"
+       data-en="★ Association of Punters · Est. at the World Cup ★">★ Associação de Palpiteiros · Fundada na Copa ★</div>
+  <h1 class="display"
+      data-en="The banter pool,<br>with <em>real odds</em>.">O bolão da resenha,<br>com <em>odds de verdade</em>.</h1>
+  <p class="sub"
+     data-en="Call it with your mates, right inside Telegram. Back the favorite, you score. Back the <strong>underdog</strong>, you score BIG. A goal drops and the <strong>narrator shouts it live</strong> — out loud, calling your name. The table shows no mercy.">Palpite no grupo dos amigos, direto no Telegram. Acertou o favorito,
+     pontua. Acertou a <strong>zebra</strong>, pontua MUITO. Gol sai, o
+     <strong>narrador grita na hora</strong> — com voz e citando seu nome. O placar
+     não perdoa ninguém.</p>
   <div class="actions">
-    <a class="btn primary display" href="https://t.me/torcidaapp_bot">🎫 Criar meu bolão</a>
-    <a class="btn ghost display" href="#como">Como funciona</a>
+    <a class="btn primary display" href="https://t.me/+B0SVEoGVrnxlYWFh"
+       data-en="🎫 Join the live banter">🎫 Entrar na resenha ao vivo</a>
+    <a class="btn ghost display" href="#como" data-en="How it works">Como funciona</a>
   </div>
 
   <div class="boardwrap">
     <div class="board">
-      <div class="title">Placar oficial · rodada de hoje</div>
+      <div class="title" data-en="Official scoreboard · today's round">Placar oficial · rodada de hoje</div>
       <div class="flaprow" id="flapboard"></div>
       <div class="foot">
-        <span id="boardmeta">COPA · SEMIFINAL</span>
-        <span class="live">● AO VIVO</span>
+        <span id="boardmeta" data-en="WORLD CUP · SEMIFINAL">COPA · SEMIFINAL</span>
+        <span class="live" data-en="● LIVE">● AO VIVO</span>
       </div>
     </div>
   </div>
 </div>
 
 <section id="como">
-  <h2 class="sec">Como funciona</h2>
+  <h2 class="sec" data-en="How it works">Como funciona</h2>
   <div class="steps">
     <div class="step">
       <div class="num">1</div>
-      <h3>Chama o bot pro grupo</h3>
-      <p>Adiciona o @torcidaapp_bot no grupo da resenha e manda <b>/novo</b>.
+      <h3 data-en="Add the bot to your group">Chama o bot pro grupo</h3>
+      <p data-en="Add @torcidaapp_bot to the banter group and send <b>/new</b>. The pool is live and the trash-talk has begun.">Adiciona o @torcidaapp_bot no grupo da resenha e manda <b>/novo</b>.
          Pronto, o bolão existe e a zoeira começou.</p>
     </div>
     <div class="step">
       <div class="num">2</div>
-      <h3>Todo mundo palpita</h3>
-      <p><b>/jogos</b> mostra os cards com as odds do momento. Um toque e o palpite
+      <h3 data-en="Everyone picks">Todo mundo palpita</h3>
+      <p data-en="<b>/games</b> shows the cards with live odds. One tap and your pick is stamped — secret until kickoff. Switch as many times as you like before the whistle."><b>/jogos</b> mostra os cards com as odds do momento. Um toque e o palpite
          tá carimbado — secreto até a bola rolar. Troca quantas vezes quiser antes do apito.</p>
     </div>
     <div class="step">
       <div class="num">3</div>
-      <h3>O jogo joga por você</h3>
-      <p>Gol sai e o bot anuncia no grupo. Apito final = pontos na conta e
+      <h3 data-en="The match plays for you">O jogo joga por você</h3>
+      <p data-en="A goal drops and the bot calls it. Final whistle = points in the bank and the leaderboard updated. Whoever trusted the underdog reaps the glory.">Gol sai e o bot anuncia no grupo. Apito final = pontos na conta e
          leaderboard atualizado. Quem confiou na zebra colhe a glória.</p>
     </div>
   </div>
-  <div class="zebra">🦓 Zebra vale mais: pontos = 100 × odd do seu palpite</div>
+  <div class="zebra" data-en="🦓 Underdogs pay more: points = 100 × your pick's odds">🦓 Zebra vale mais: pontos = 100 × odd do seu palpite</div>
 </section>
 
 <section>
-  <h2 class="sec">Feito pra resenha</h2>
+  <h2 class="sec" data-en="Built for the banter">Feito pra resenha</h2>
   <div class="features">
     <div class="feature">
-      <h3>🤫 Palpite secreto</h3>
-      <p>Ninguém vê seu palpite antes do jogo — nem o dedo-duro do grupo.
+      <h3 data-en="📣 A narrator that shouts the goal">📣 Narrador que grita o gol</h3>
+      <p data-en="A real voice narrating live in the group — calling <b>your name</b> when you nail the pick (or when you choke). VAR, penalties and red cards: the bot flags it all.">Voz de verdade narrando ao vivo no grupo — e citando <b>seu nome</b> quando
+         você crava (ou quando chora) o palpite. VAR, pênalti e vermelho: o bot avisa tudo.</p>
+    </div>
+    <div class="feature">
+      <h3 data-en="🤫 Secret picks">🤫 Palpite secreto</h3>
+      <p data-en="Nobody sees your pick before the match — not even the group snitch. Your slip stays in the private app.">Ninguém vê seu palpite antes do jogo — nem o dedo-duro do grupo.
          Seu carnê fica no app privado.</p>
     </div>
     <div class="feature">
-      <h3>📟 Odds de consenso ao vivo</h3>
-      <p>As odds vêm de feed profissional (TxODDS), com registro verificável.
+      <h3 data-en="📟 Live consensus odds">📟 Odds de consenso ao vivo</h3>
+      <p data-en="Odds come from a pro feed (TxODDS), with a verifiable record. No guesswork: the risk you took is on the books.">As odds vêm de feed profissional (TxODDS), com registro verificável.
          Sem achismo: o risco que você topou fica gravado.</p>
     </div>
     <div class="feature">
-      <h3>🎫 App dentro do Telegram</h3>
-      <p>Palpita, troca e acompanha o placar num app que abre no próprio chat.
+      <h3 data-en="🎫 An app inside Telegram">🎫 App dentro do Telegram</h3>
+      <p data-en="Pick, switch and follow the score in an app that opens right in the chat. Zero signup, zero passwords.">Palpita, troca e acompanha o placar num app que abre no próprio chat.
          Zero cadastro, zero senha.</p>
     </div>
     <div class="feature">
-      <h3>🏆 Prêmio do seu jeito</h3>
-      <p>Vencedor leva tudo, top 3 ou estilo poker (top 20%). O grupo decide,
+      <h3 data-en="🏆 Prizes your way">🏆 Prêmio do seu jeito</h3>
+      <p data-en="Winner takes all, top 3 or poker-style (top 20%). The group decides, the bot collects the losers' shame.">Vencedor leva tudo, top 3 ou estilo poker (top 20%). O grupo decide,
          o bot cobra a fama dos perdedores.</p>
     </div>
   </div>
 </section>
 
 <section>
-  <h2 class="sec">A Copa é só o pontapé</h2>
+  <h2 class="sec" data-en="The World Cup is just kickoff">A Copa é só o pontapé</h2>
   <div class="steps">
     <div class="step">
-      <h3>⚽ Futebol</h3>
-      <p>Copa, brasileirão, champions, várzea com feed. Onde tem odd,
+      <h3 data-en="⚽ Football">⚽ Futebol</h3>
+      <p data-en="World Cup, leagues, Champions, any match with a feed. Where there are odds, there's a pool — and an underdog for glory.">Copa, brasileirão, champions, várzea com feed. Onde tem odd,
          tem bolão — e tem zebra pra dar glória.</p>
     </div>
     <div class="step">
-      <h3>🏀 Basquete</h3>
-      <p>NBA no grupo da firma: palpita no intervalo do almoço,
+      <h3 data-en="🏀 Basketball">🏀 Basquete</h3>
+      <p data-en="NBA in the office group: pick at lunch, reap the points overnight.">NBA no grupo da firma: palpita no intervalo do almoço,
          colhe os pontos na madrugada.</p>
     </div>
     <div class="step">
-      <h3>🏈 Futebol americano</h3>
-      <p>Domingo de NFL com narrador gritando touchdown em português.
+      <h3 data-en="🏈 American football">🏈 Futebol americano</h3>
+      <p data-en="NFL Sundays with the narrator shouting touchdown. Trust us, it's better.">Domingo de NFL com narrador gritando touchdown em português.
          Confia que fica melhor.</p>
     </div>
   </div>
-  <p style="margin-top:18px; color:#5A5343; font-size:16px">
+  <p style="margin-top:18px; color:#5A5343; font-size:16px"
+     data-en="Our data feed (TxODDS) covers <b>30+ sports</b> — Torcida's scoreboard already reads football, basketball and American football out of the box. The list only grows. 📟">
     Nosso feed de dados (TxODDS) cobre <b>30+ esportes</b> — o placar do
     Torcida já nasce sabendo ler futebol, basquete e futebol americano.
     A lista só cresce. 📟</p>
@@ -259,7 +285,7 @@
 
 <section>
   <div class="honest">
-    <p><strong>Pontos são abertos e globais; dinheiro é assunto do seu grupo.</strong><br>
+    <p data-en="<strong>Points are open and global; money is your group's business.</strong><br>Torcida never custodies nor issues value — we handle the score, the banter and the glory. 🏆"><strong>Pontos são abertos e globais; dinheiro é assunto do seu grupo.</strong><br>
     O Torcida nunca custodia nem emite valor — a gente cuida do placar,
     da zoeira e da glória. 🏆</p>
   </div>
@@ -272,13 +298,37 @@
 </footer>
 
 <script>
-/* split-flap: cycles through today's fixtures with a flip animation */
+/* ---------- i18n: PT default, EN toggle (remembers choice) ---------- */
+const I18N_BOARD = { pt: "SEU GRUPO AQUI", en: "YOUR GROUP HERE" };
+let LANG = (function () {
+  try { return localStorage.getItem('torcida_lang') || 'pt'; } catch (e) { return 'pt'; }
+})();
+
+function applyLang(lang) {
+  LANG = (lang === 'en') ? 'en' : 'pt';
+  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+  document.querySelectorAll('[data-en]').forEach(function (el) {
+    if (el.dataset.pt === undefined) el.dataset.pt = el.innerHTML; // capture PT once
+    el.innerHTML = LANG === 'en' ? el.dataset.en : el.dataset.pt;
+  });
+  document.querySelectorAll('.langbtn').forEach(function (b) {
+    b.classList.toggle('on', b.dataset.lang === LANG);
+  });
+  if (lines.length) lines[lines.length - 1] = I18N_BOARD[LANG];
+  try { localStorage.setItem('torcida_lang', LANG); } catch (e) {}
+}
+
+document.querySelectorAll('.langbtn').forEach(function (b) {
+  b.addEventListener('click', function () { applyLang(b.dataset.lang); });
+});
+
+/* ---------- split-flap: cycles through today's fixtures with a flip ---------- */
 const lines = [
-  "FRA 0 x 0 ESP",
+  "FRA 0 x 2 ESP",
   "ING  x  ARG",
   "LAL 98x102 BOS",
   "KC 24 x 21 SF",
-  "SEU GRUPO AQUI",
+  I18N_BOARD[LANG],
 ];
 const boardEl = document.getElementById('flapboard');
 const WIDTH = 14;
@@ -315,6 +365,9 @@ renderInitial();
 let idx = 0;
 setLine(lines[0]);
 setInterval(() => { idx = (idx + 1) % lines.length; setLine(lines[idx]); }, 4200);
+
+/* apply saved/default language on load */
+applyLang(LANG);
 </script>
 </body>
 </html>

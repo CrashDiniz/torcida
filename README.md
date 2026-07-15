@@ -13,8 +13,10 @@ data anchored on Solana, for the TxODDS World Cup Hackathon (Superteam Earn, 202
 - Create a pool, share an invite link, friends join in one tap — no signup.
 - Picks are priced by live consensus odds at pick time: calling the underdog pays more.
 - In-play flash picks ("goal before 75'?") resolved by the live feed in seconds.
-- An AI narrator (radio-style persona, PT/EN/ES) posts voice notes on goals, cards
-  and odds swings — with a configurable anti-spoiler delay.
+- An AI narrator posts voice notes on goals, cards and odds swings in a Brazilian
+  radio-style "resenha" (PT-BR), with a configurable anti-spoiler delay. The
+  narration pipeline (event → LLM line → TTS) is language-agnostic; EN/ES personas
+  are on the roadmap.
 - Pool creator chooses the payout structure: winner-takes-all, top 3, or top 20%
   poker-style table.
 
