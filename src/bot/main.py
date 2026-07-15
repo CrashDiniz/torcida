@@ -26,7 +26,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (CallbackQuery, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message, WebAppInfo)
 
-from ..engine.models import PayoutPreset, Pick, PickStatus, Pool
+from ..engine.models import PayoutPreset, Pick, PickStatus, Pool, Visibility
 from ..engine.odds import parse_snapshot
 from ..engine.scoring import points_for
 from ..engine.settlement import FixtureState, SettlementService
@@ -143,12 +143,15 @@ async def _refresh_vitrine(bot: Bot, chat_id: int) -> None:
                       + "\n\n") if live else ""
         hint = await _next_fixture_hint()
         next_line = f"\n⏱ {html.escape(hint)}" if hint else ""
+        pot_line = (f"💰 Pote: <b>{pool.buy_in * len(rows)} fichas</b>\n"
+                    if pool.buy_in > 0 else "")
         text = (
             f"{live_block}"
             f"🏆 <b>BOLÃO ATIVO</b>\n\n"
             f"⚽ <b>{html.escape(pool.name)}</b>\n"
             f"👥 {len(rows)} palpiteiro{'s' if len(rows) != 1 else ''} · "
-            f"{PAYOUT_LABELS[pool.payout_preset]}\n\n"
+            f"{PAYOUT_LABELS[pool.payout_preset]}\n"
+            f"{pot_line}\n"
             f"{board}{next_line}\n\n"
             f"🤫 Palpite é secreto até a bola rolar — palpita aqui embaixo 👇")
         rows_kb = []
@@ -316,7 +319,10 @@ async def start(message: Message) -> None:
 
 async def _create_pool(message: Message, name: str,
                        creator_id: int, creator_name: str) -> None:
-    pool = Pool(id=uuid.uuid4().hex, name=name, creator_id=creator_id)
+    # group pools are public by default: they show up on the app's Descobrir
+    # tab so friends (and externos via link/site) can find and join them
+    pool = Pool(id=uuid.uuid4().hex, name=name, creator_id=creator_id,
+                visibility=Visibility.PUBLIC)
     store.create_pool(pool, telegram_chat_id=message.chat.id)
     store.join(pool.id, creator_id, creator_name)
     _register_chat_pool(message.chat.id, pool)
@@ -395,6 +401,32 @@ async def choose_payout(callback: CallbackQuery) -> None:
     with store._conn() as c:  # MVP: direct update
         c.execute("UPDATE pools SET payout_preset=? WHERE id=?", (preset.value, pool_id))
     await callback.message.edit_reply_markup(reply_markup=None)
+    buyin_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=label, callback_data=f"buyin:{pool_id}:{amount}")
+        for amount, label in BUYIN_OPTIONS
+    ]])
+    await callback.message.answer(
+        f"Premiação definida: {PAYOUT_LABELS[preset]} ✅\n"
+        f"Agora a <b>entrada</b> — fichas fictícias que cada um paga pro pote "
+        f"(divide pela premiação no fim). Sem dinheiro real:",
+        parse_mode="HTML", reply_markup=buyin_kb)
+    await _answer(callback, "")
+
+
+BUYIN_OPTIONS = [(0, "Grátis"), (50, "50 🪙"), (100, "100 🪙"), (250, "250 🪙")]
+
+
+@router.callback_query(F.data.startswith("buyin:"))
+async def choose_buyin(callback: CallbackQuery) -> None:
+    _, pool_id, amount = callback.data.split(":")
+    pool = store.pool_by_id(pool_id)
+    if pool is None or callback.from_user.id != pool.creator_id:
+        await _answer(callback, "Só quem criou o bolão define a entrada 😉")
+        return
+    with store._conn() as c:  # MVP: direct update
+        c.execute("UPDATE pools SET buy_in=? WHERE id=?", (int(amount), pool_id))
+    await callback.message.edit_reply_markup(reply_markup=None)
+    tag = "Grátis (joga por pontos)" if int(amount) == 0 else f"{amount} 🪙 por cabeça"
     theme_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=e, callback_data=f"theme:{pool_id}:{e}")
          for e in THEME_EMOJIS[:4]],
@@ -402,7 +434,7 @@ async def choose_payout(callback: CallbackQuery) -> None:
          for e in THEME_EMOJIS[4:]],
     ])
     await callback.message.answer(
-        f"Premiação definida: {PAYOUT_LABELS[preset]} ✅\n"
+        f"Entrada: {tag} ✅\n"
         f"Agora escolhe o tema — ele identifica o bolão em tudo:",
         reply_markup=theme_kb)
     await _answer(callback, "")
@@ -1049,16 +1081,20 @@ def _make_announcers(bot: Bot):
         medals = ["🥇", "🥈", "🥉"]
         for pool_id, chat_id in store.chats_for_fixture(state.fixture_id):
             pool = store.pool_by_id(pool_id)
-            rows = store.standings(pool_id)
+            has_pot = pool is not None and pool.buy_in > 0
+            split = store.pot_split(pool_id)  # [(uid, name, points, chips)]
             board = "\n".join(
                 f"{medals[i] if i < 3 else f'{i + 1}.'} "
                 f"<b>{html.escape(name)}</b> — {points} pts"
-                for i, (_, name, points) in enumerate(rows))
+                + (f" · <b>{chips} 🪙</b>" if has_pot else "")
+                for i, (_, name, points, chips) in enumerate(split))
+            pot_line = (f"\n💰 Pote: <b>{store.pot_for(pool_id)} fichas</b> · "
+                        f"{PAYOUT_LABELS[pool.payout_preset]}\n" if has_pot else "")
             await _safe_send(
                 bot, chat_id,
                 f"🏁 <b>Fim de jogo!</b>\n{html.escape(label)}: "
                 f"<b>{home} x {away}</b>\n\n"
-                f"Palpites liquidados. 📊 <b>{html.escape(pool.name)}</b>:\n"
+                f"Palpites liquidados. 📊 <b>{html.escape(pool.name)}</b>:{pot_line}\n"
                 f"{board}")
             ogg = await narrate("final", label, home, away,
                                 leader=rows[0][1] if rows else "")

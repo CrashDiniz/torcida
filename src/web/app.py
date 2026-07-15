@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from src.engine.models import Pick, PickStatus
+from src.engine.models import (PayoutPreset, Pick, PickStatus, Pool,
+                               RequestStatus, Visibility)
 from src.engine.odds import parse_snapshot
 from src.engine.scoring import points_for
 from src.engine.store import Store
@@ -30,6 +32,18 @@ txline = TxLineClient.from_env()
 
 STATUS_LABELS = {PickStatus.OPEN: ("⏳", "aberto"), PickStatus.WON: ("✅", "ganhou"),
                  PickStatus.LOST: ("❌", "perdeu")}
+
+PAYOUT_LABELS = {
+    PayoutPreset.WINNER_TAKES_ALL: "🥇 Vencedor leva tudo",
+    PayoutPreset.TOP3: "🏆 Top 3 (50/30/20)",
+    PayoutPreset.POKER: "🃏 Top 20% (estilo poker)",
+}
+PAYOUT_OPTIONS = [(p.value, PAYOUT_LABELS[p]) for p in PayoutPreset]
+VISIBILITY_OPTIONS = [
+    (Visibility.PUBLIC.value, "🔓 Livre — qualquer um entra"),
+    (Visibility.REQUEST.value, "🙋 Sob pedido — você aprova quem entra"),
+    (Visibility.HIDDEN.value, "🔒 Só por convite — fora da vitrine"),
+]
 
 _fixtures_cache: tuple[float, list] = (0.0, [])
 FIXTURES_TTL_S = 60
@@ -104,11 +118,42 @@ async def _state_payload(uid: int, first_name: str) -> dict:
                 "locked": fixture_locked(f),
                 "mine": mine_by_fixture.get(f["FixtureId"]),
             })
-        standings = [{"name": name, "points": points, "me": row_uid == uid}
-                     for row_uid, name, points in store.standings(pool.id)]
+        standings = [{"name": name, "points": points,
+                      "chips": chips, "me": row_uid == uid}
+                     for row_uid, name, points, chips in store.pot_split(pool.id)]
         pools.append({"id": pool.id, "name": pool.name, "picks": picks,
-                      "fixtures": fixtures, "standings": standings})
-    return {"first_name": first_name, "pools": pools}
+                      "fixtures": fixtures, "standings": standings,
+                      "buy_in": pool.buy_in, "pot": store.pot_for(pool.id),
+                      "payout_label": PAYOUT_LABELS[pool.payout_preset],
+                      "is_creator": pool.creator_id == uid})
+    requests = [{"pool_id": r.pool_id, "pool_name": (p.name if
+                 (p := store.pool_by_id(r.pool_id)) else "?"),
+                 "user_id": r.user_id, "name": r.display_name}
+                for r in store.pending_requests_for_creator(uid)]
+    return {"first_name": first_name, "pools": pools, "requests": requests}
+
+
+def _discover_payload(uid: int) -> dict:
+    """Public/request pools the user can browse — with their join state so the
+    card knows whether to show Join, Request, Pending or Open."""
+    items = []
+    for pool in store.public_pools():
+        if store.is_member(pool.id, uid):
+            my_status = "member"
+        elif (rs := store.request_status(pool.id, uid)) == RequestStatus.PENDING:
+            my_status = "pending"
+        else:
+            my_status = "none"
+        items.append({
+            "id": pool.id, "name": pool.name,
+            "creator": store.creator_name(pool),
+            "visibility": pool.visibility.value, "buy_in": pool.buy_in,
+            "pot": store.pot_for(pool.id), "entries": store.entry_count(pool.id),
+            "payout_label": PAYOUT_LABELS[pool.payout_preset],
+            "my_status": my_status,
+        })
+    return {"pools": items, "payout_options": PAYOUT_OPTIONS,
+            "visibility_options": VISIBILITY_OPTIONS}
 
 
 @app.post("/api/state")
@@ -164,6 +209,136 @@ async def leave(req: LeaveRequest):
         return JSONResponse({"error": "auth"}, status_code=401)
     store.leave(req.pool_id, int(user["id"]))
     return {"ok": True}
+
+
+class DiscoverRequest(BaseModel):
+    initData: str
+
+
+class CreateRequest(BaseModel):
+    initData: str
+    name: str
+    visibility: str = "public"
+    buy_in: int = 0
+    payout_preset: str = "top3"
+
+
+class JoinRequest_(BaseModel):
+    initData: str
+    pool_id: str
+
+
+class ApproveRequest(BaseModel):
+    initData: str
+    pool_id: str
+    user_id: int
+    decision: str  # "approve" | "deny"
+
+
+@app.post("/api/discover")
+async def discover(req: DiscoverRequest):
+    user = _auth(req.initData)
+    if user is None:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    return _discover_payload(int(user["id"]))
+
+
+@app.post("/api/create")
+async def create_pool(req: CreateRequest):
+    user = _auth(req.initData)
+    if user is None:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    name = req.name.strip()[:60]
+    if not name:
+        return JSONResponse({"error": "name"}, status_code=400)
+    try:
+        visibility = Visibility(req.visibility)
+        preset = PayoutPreset(req.payout_preset)
+    except ValueError:
+        return JSONResponse({"error": "option"}, status_code=400)
+    buy_in = max(0, min(int(req.buy_in), 1_000_000))
+    uid = int(user["id"])
+    pool = Pool(id=uuid.uuid4().hex, name=name, creator_id=uid,
+                payout_preset=preset, buy_in=buy_in, visibility=visibility)
+    store.create_pool(pool)  # app-born pool: not bound to a group chat
+    store.join(pool.id, uid, user.get("first_name", "Anfitrião"))
+    return {"ok": True, "pool_id": pool.id}
+
+
+@app.post("/api/join")
+async def join_pool(req: JoinRequest_):
+    user = _auth(req.initData)
+    if user is None:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    pool = store.pool_by_id(req.pool_id)
+    if pool is None:
+        return JSONResponse({"error": "pool"}, status_code=404)
+    uid = int(user["id"])
+    if store.is_member(pool.id, uid):
+        return {"ok": True, "status": "member"}
+    if pool.visibility != Visibility.PUBLIC:
+        return JSONResponse({"error": "not_open"}, status_code=403)
+    store.join(pool.id, uid, user.get("first_name", "Torcedor"))
+    return {"ok": True, "status": "member"}
+
+
+async def _notify_creator(creator_id: int, requester: str, pool_name: str) -> None:
+    """Best-effort DM to the pool creator when someone asks to join. Only lands
+    if the creator has already started the bot; never raises."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return
+    import httpx
+    text = (f"🙋 <b>{requester}</b> quer entrar no seu bolão "
+            f"<b>{pool_name}</b>.\nAbra o Torcida e aprove na aba 🎫 Meus bolões.")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": creator_id, "text": text, "parse_mode": "HTML"})
+    except Exception:
+        pass  # creator hasn't DM'd the bot, or network hiccup — banner still shows
+
+
+@app.post("/api/request")
+async def request_join(req: JoinRequest_):
+    user = _auth(req.initData)
+    if user is None:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    pool = store.pool_by_id(req.pool_id)
+    if pool is None:
+        return JSONResponse({"error": "pool"}, status_code=404)
+    uid = int(user["id"])
+    if store.is_member(pool.id, uid):
+        return {"ok": True, "status": "member"}
+    if pool.visibility != Visibility.REQUEST:
+        return JSONResponse({"error": "not_requestable"}, status_code=403)
+    name = user.get("first_name", "Torcedor")
+    store.create_join_request(pool.id, uid, name)
+    await _notify_creator(pool.creator_id, name, pool.name)
+    return {"ok": True, "status": "pending"}
+
+
+@app.post("/api/approve")
+async def approve_request(req: ApproveRequest):
+    user = _auth(req.initData)
+    if user is None:
+        return JSONResponse({"error": "auth"}, status_code=401)
+    pool = store.pool_by_id(req.pool_id)
+    if pool is None or pool.creator_id != int(user["id"]):
+        return JSONResponse({"error": "not_creator"}, status_code=403)
+    if req.decision == "approve":
+        rs = store.request_status(pool.id, req.user_id)
+        name = next((r.display_name for r in
+                     store.pending_requests_for_creator(int(user["id"]))
+                     if r.user_id == req.user_id), "Torcedor")
+        if rs is None:
+            return JSONResponse({"error": "no_request"}, status_code=404)
+        store.join(pool.id, req.user_id, name)
+        store.set_request_status(pool.id, req.user_id, RequestStatus.APPROVED)
+        return {"ok": True, "status": "approved"}
+    store.set_request_status(pool.id, req.user_id, RequestStatus.DENIED)
+    return {"ok": True, "status": "denied"}
 
 
 PAGE = """<!doctype html>
@@ -272,6 +447,42 @@ PAGE = """<!doctype html>
     pointer-events: none; max-width: 90vw; text-align: center;
   }
   #toast.show { opacity: 1; }
+  .tabs { display: flex; max-width: 520px; margin: 0 auto; position: sticky;
+    top: 0; z-index: 5; background: var(--paper); border-bottom: 2px solid var(--green); }
+  .tab { flex: 1; padding: 12px 6px; text-align: center; cursor: pointer;
+    font-family: Georgia, serif; font-size: 13px; letter-spacing: 1px;
+    text-transform: uppercase; color: #8A7F68; background: none; border: 0;
+    border-bottom: 3px solid transparent; }
+  .tab.on { color: var(--green); font-weight: bold; border-bottom-color: var(--gold); }
+  .card { background: #FBF6EA; border: 1px solid #D8CDB4; border-radius: 6px;
+    padding: 12px 14px; margin-bottom: 12px; box-shadow: 1px 2px 0 rgba(38,34,26,.12); }
+  .card .cname { font-size: 16px; font-weight: bold; }
+  .card .cby { font-size: 12px; color: #6E6552; margin-bottom: 8px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: rgba(27,77,62,.1); color: var(--green); border: 1px solid rgba(27,77,62,.25); }
+  .pill.pot { background: rgba(217,164,65,.18); color: #8A6A1E; border-color: rgba(217,164,65,.5); }
+  .btn { display: block; width: 100%; padding: 10px; font-family: Georgia, serif;
+    font-size: 14px; background: var(--green); color: var(--paper); border: 0;
+    border-radius: 5px; cursor: pointer; box-shadow: 1px 2px 0 rgba(38,34,26,.3); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+  .btn.ghost { background: none; color: var(--green); border: 1.5px solid var(--green);
+    box-shadow: none; }
+  .btn.stamp-btn { background: var(--stamp); }
+  .potline { font-size: 13px; color: #8A6A1E; text-align: center; margin: 6px auto 0;
+    max-width: 520px; }
+  .form { max-width: 520px; margin: 0 auto 8px; padding: 0 14px; }
+  .form input, .form select { width: 100%; padding: 9px 10px; margin-bottom: 8px;
+    font-family: Georgia, serif; font-size: 14px; border: 1.5px solid #C9BC9D;
+    border-radius: 5px; background: #FBF6EA; color: var(--ink); }
+  .form label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--green); display: block; margin-bottom: 3px; }
+  .reqbar { background: rgba(217,164,65,.15); border: 1px solid rgba(217,164,65,.5);
+    border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
+  .reqbar .who { font-size: 14px; margin-bottom: 6px; }
+  .reqbar .acts { display: flex; gap: 8px; }
+  .reqbar .acts .btn { padding: 6px; font-size: 13px; }
+  td.chips { text-align: right; font-family: 'Courier New', monospace; color: #8A6A1E; }
 </style>
 </head>
 <body>
@@ -280,11 +491,19 @@ PAGE = """<!doctype html>
   <h1>Torcida</h1>
   <small>Associação de Palpiteiros ★ Fundada na Copa</small>
 </header>
-<div id="root"><p class="empty">Carregando o placar…</p></div>
+<nav class="tabs">
+  <button class="tab" id="tab-discover" onclick="switchTab('discover')">🔎 Descobrir</button>
+  <button class="tab" id="tab-mine" onclick="switchTab('mine')">🎫 Meus bolões</button>
+</nav>
+<div id="root"><p class="empty">Carregando…</p></div>
 <div id="toast"></div>
 <script>
 const tg = window.Telegram?.WebApp;
-let state = null;
+let state = null;       // /api/state — my pools
+let discover = null;    // /api/discover — public pools + create options
+let tab = 'mine';
+const medals = ['🥇','🥈','🥉'];
+const VIS_LABEL = {public: '🔓 Livre', request: '🙋 Sob pedido', hidden: '🔒 Convite'};
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -315,25 +534,63 @@ async function load() {
     return;
   }
   state = res.data;
+  tab = state.pools.length ? 'mine' : 'discover';
   render();
+  if (tab === 'discover') loadDiscover();
+}
+
+async function refreshState() {
+  const st = await api('/api/state', {});
+  if (st.ok) state = st.data;
+}
+
+async function loadDiscover() {
+  const res = await api('/api/discover', {});
+  if (res.ok) { discover = res.data; if (tab === 'discover') render(); }
+}
+
+function switchTab(t) {
+  tab = t;
+  render();
+  if (t === 'discover' && !discover) loadDiscover();
 }
 
 function render() {
+  document.getElementById('tab-discover').classList.toggle('on', tab === 'discover');
+  document.getElementById('tab-mine').classList.toggle('on', tab === 'mine');
+  if (tab === 'discover') renderDiscover(); else renderMine();
+}
+
+function openMine() { tab = 'mine'; render(); }
+
+function renderMine() {
   const root = document.getElementById('root');
+  const reqs = (state.requests || []).map(r => `
+    <div class="reqbar">
+      <div class="who">🙋 <b>${esc(r.name)}</b> quer entrar em <b>${esc(r.pool_name)}</b></div>
+      <div class="acts">
+        <button class="btn" onclick="approve('${r.pool_id}',${r.user_id},'approve')">✅ Aprovar</button>
+        <button class="btn ghost" onclick="approve('${r.pool_id}',${r.user_id},'deny')">❌ Negar</button>
+      </div>
+    </div>`).join('');
+  const reqBlock = reqs ? '<section>' + reqs + '</section>' : '';
   if (!state.pools.length) {
-    root.innerHTML = '<p class="empty">Você ainda não está em nenhum bolão.<br>' +
-      'Manda /jogos no grupo e faz sua fezinha! ⚽</p>';
+    root.innerHTML = reqBlock +
+      '<p class="empty">Você ainda não está em nenhum bolão.<br>' +
+      'Vai na aba <b>🔎 Descobrir</b> e faz sua fezinha! ⚽</p>';
     return;
   }
-  const medals = ['🥇','🥈','🥉'];
-  root.innerHTML = state.pools.map((pool, pi) => `
+  root.innerHTML = reqBlock + state.pools.map((pool, pi) => `
     <div class="board">
       <div class="row"><span>${esc(pool.name).toUpperCase()}</span>
         <span class="live">● AO VIVO</span></div>
       ${pool.standings.slice(0,3).map((r,i) => `
         <div class="row"><span>${medals[i]} ${esc(r.name)}</span>
-          <span>${r.points} PTS</span></div>`).join('')}
+          <span>${pool.pot ? r.chips + ' 🪙' : r.points + ' PTS'}</span></div>`).join('')}
     </div>
+    ${pool.pot
+      ? `<div class="potline">💰 Prêmio: <b>${pool.pot} fichas</b> · ${esc(pool.payout_label)}</div>`
+      : `<div class="potline">Bolão grátis — joga por pontos e glória 🦓</div>`}
     <section>
       <h2>⚽ Palpitar · trocar</h2>
       ${pool.fixtures.map(f => `
@@ -368,11 +625,117 @@ function render() {
       <table>${pool.standings.map((r,i) => `
         <tr class="${r.me ? 'me' : ''}">
           <td><span class="medal">${medals[i] ?? (i+1)+'.'}</span>${esc(r.name)}</td>
+          ${pool.pot ? `<td class="chips">${r.chips} 🪙</td>` : ''}
           <td class="pts">${r.points}</td></tr>`).join('')}
       </table>
       <button class="leave" onclick="leavePool('${pool.id}', '${esc(pool.name)}')">
         🚪 Sair de ${esc(pool.name)}</button>
     </section>`).join('');
+}
+
+function renderDiscover() {
+  const root = document.getElementById('root');
+  if (!discover) { root.innerHTML = '<p class="empty">Carregando bolões…</p>'; return; }
+  const cards = discover.pools.map(p => {
+    let btn;
+    if (p.my_status === 'member')
+      btn = `<button class="btn ghost" onclick="openMine()">✅ Você está nesse — abrir</button>`;
+    else if (p.my_status === 'pending')
+      btn = `<button class="btn" disabled>⏳ Solicitação enviada</button>`;
+    else if (p.visibility === 'public')
+      btn = `<button class="btn" onclick="join('${p.id}')">🎯 Fazer minha fezinha</button>`;
+    else
+      btn = `<button class="btn" onclick="requestJoin('${p.id}')">🙋 Solicitar entrada</button>`;
+    return `<div class="card">
+      <div class="cname">${esc(p.name)}</div>
+      <div class="cby">por ${esc(p.creator)} · ${p.entries} palpiteiro${p.entries === 1 ? '' : 's'}</div>
+      <div class="pills">
+        <span class="pill">${VIS_LABEL[p.visibility] || ''}</span>
+        <span class="pill">${p.buy_in ? 'Entrada: ' + p.buy_in + ' 🪙' : 'Grátis'}</span>
+        ${p.buy_in ? `<span class="pill pot">Prêmio: ${p.pot} 🪙</span>` : ''}
+        <span class="pill">${esc(p.payout_label)}</span>
+      </div>
+      ${btn}
+    </div>`;
+  }).join('');
+  root.innerHTML = `
+    <section>
+      <button class="btn stamp-btn" onclick="toggleForm()">➕ Criar um bolão</button>
+      <div id="createForm" style="display:none"></div>
+    </section>
+    <section>
+      <h2>🏟 Bolões abertos</h2>
+      ${discover.pools.length ? cards
+        : '<p class="empty">Nenhum bolão aberto ainda — cria o primeiro! ⚽</p>'}
+    </section>`;
+}
+
+function renderForm() {
+  const f = document.getElementById('createForm');
+  if (!f || !discover) return;
+  const vOpts = discover.visibility_options
+    .map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
+  const pOpts = discover.payout_options
+    .map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
+  f.innerHTML = `<div class="form">
+    <label>Nome do bolão</label>
+    <input id="f-name" maxlength="60" placeholder="Bolão da firma">
+    <label>Quem pode entrar</label>
+    <select id="f-vis">${vOpts}</select>
+    <label>Entrada (fichas fictícias — 0 = grátis)</label>
+    <input id="f-buyin" type="number" min="0" value="0" inputmode="numeric">
+    <label>Premiação</label>
+    <select id="f-payout">${pOpts}</select>
+    <button class="btn" onclick="createPool()">🏟 Criar bolão</button>
+  </div>`;
+}
+
+function toggleForm() {
+  const f = document.getElementById('createForm');
+  if (!f) return;
+  if (f.style.display === 'none') { renderForm(); f.style.display = 'block'; }
+  else { f.style.display = 'none'; }
+}
+
+async function createPool() {
+  const name = (document.getElementById('f-name').value || '').trim();
+  if (!name) { toast('Dá um nome pro bolão 😉'); return; }
+  const body = {
+    name,
+    visibility: document.getElementById('f-vis').value,
+    buy_in: parseInt(document.getElementById('f-buyin').value || '0', 10),
+    payout_preset: document.getElementById('f-payout').value,
+  };
+  const res = await api('/api/create', body);
+  if (!res.ok) { toast('😕 Não rolou — tenta de novo'); return; }
+  toast('🏟 Bolão criado! Bora chamar a galera.');
+  if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+  discover = null; await refreshState();
+  tab = 'mine'; render(); loadDiscover();
+}
+
+async function join(poolId) {
+  const res = await api('/api/join', {pool_id: poolId});
+  if (!res.ok) { toast('😕 Não consegui te colocar — tenta de novo'); return; }
+  toast('🎉 Você entrou! Faz tua fezinha.');
+  if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+  discover = null; await refreshState();
+  tab = 'mine'; render(); loadDiscover();
+}
+
+async function requestJoin(poolId) {
+  const res = await api('/api/request', {pool_id: poolId});
+  if (!res.ok) { toast('😕 Não rolou — tenta de novo'); return; }
+  toast('🙋 Pedido enviado! O dono do bolão decide.');
+  discover = null; loadDiscover();
+}
+
+async function approve(poolId, userId, decision) {
+  const res = await api('/api/approve',
+    {pool_id: poolId, user_id: userId, decision});
+  if (!res.ok) { toast('😕 Não rolou — tenta de novo'); return; }
+  toast(decision === 'approve' ? '✅ Entrou no bolão!' : '❌ Recusado.');
+  await refreshState(); discover = null; render();
 }
 
 async function pick(pi, poolId, fixtureId, sel) {

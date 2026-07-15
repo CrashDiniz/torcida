@@ -8,7 +8,9 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from .models import Entry, PayoutPreset, Pick, PickStatus, Pool
+from .models import (Entry, JoinRequest, PayoutPreset, Pick, PickStatus, Pool,
+                     RequestStatus, Visibility)
+from .payout import settle_pool
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pools (
@@ -21,7 +23,17 @@ CREATE TABLE IF NOT EXISTS pools (
   entry_points INTEGER NOT NULL DEFAULT 1000,
   created_at REAL NOT NULL,
   invite_code TEXT NOT NULL UNIQUE,
-  telegram_chat_id INTEGER
+  telegram_chat_id INTEGER,
+  buy_in INTEGER NOT NULL DEFAULT 0,
+  visibility TEXT NOT NULL DEFAULT 'hidden'
+);
+CREATE TABLE IF NOT EXISTS join_requests (
+  pool_id TEXT NOT NULL REFERENCES pools(id),
+  user_id INTEGER NOT NULL,
+  display_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  requested_at REAL NOT NULL,
+  PRIMARY KEY (pool_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS entries (
   pool_id TEXT NOT NULL REFERENCES pools(id),
@@ -70,6 +82,19 @@ class Store:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(SCHEMA)
+            self._migrate(c)
+
+    @staticmethod
+    def _migrate(c: sqlite3.Connection) -> None:
+        """Add columns introduced after a DB was first created. ALTER TABLE
+        ADD COLUMN is metadata-only in sqlite (no row rewrite) — safe on a live
+        DB. Idempotent: only adds what's missing."""
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(pools)")}
+        if "buy_in" not in cols:
+            c.execute("ALTER TABLE pools ADD COLUMN buy_in INTEGER NOT NULL DEFAULT 0")
+        if "visibility" not in cols:
+            c.execute("ALTER TABLE pools ADD COLUMN "
+                      "visibility TEXT NOT NULL DEFAULT 'hidden'")
 
     @contextmanager
     def _conn(self):
@@ -88,10 +113,13 @@ class Store:
     def create_pool(self, pool: Pool, telegram_chat_id: int | None = None) -> Pool:
         with self._conn() as c:
             c.execute(
-                "INSERT INTO pools VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO pools (id, name, creator_id, payout_preset, language, "
+                "narrator_delay_s, created_at, invite_code, telegram_chat_id, "
+                "buy_in, visibility) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (pool.id, pool.name, pool.creator_id, pool.payout_preset.value,
-                 pool.language, pool.narrator_delay_s, pool.entry_points,
-                 pool.created_at, pool.invite_code, telegram_chat_id),
+                 pool.language, pool.narrator_delay_s, pool.created_at,
+                 pool.invite_code, telegram_chat_id, pool.buy_in,
+                 pool.visibility.value),
             )
         return pool
 
@@ -135,6 +163,58 @@ class Store:
             ).fetchall()
         return [self._pool(r) for r in rows]
 
+    def public_pools(self) -> list[Pool]:
+        """Pools discoverable on the showcase (public or request-to-join)."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM pools WHERE visibility IN ('public','request') "
+                "ORDER BY created_at DESC"
+            ).fetchall()
+        return [self._pool(r) for r in rows]
+
+    def is_member(self, pool_id: str, user_id: int) -> bool:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT 1 FROM entries WHERE pool_id=? AND user_id=?",
+                (pool_id, user_id),
+            ).fetchone()
+        return row is not None
+
+    def entry_count(self, pool_id: str) -> int:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n FROM entries WHERE pool_id=?", (pool_id,)
+            ).fetchone()
+        return row["n"]
+
+    def creator_name(self, pool: Pool) -> str:
+        """Display name the creator joined with (they auto-join on create)."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT display_name FROM entries WHERE pool_id=? AND user_id=?",
+                (pool.id, pool.creator_id),
+            ).fetchone()
+        return row["display_name"] if row else "Anfitrião"
+
+    def pot_for(self, pool_id: str) -> int:
+        """Fictional prize pot: buy_in charged once per entry."""
+        pool = self.pool_by_id(pool_id)
+        if pool is None:
+            return 0
+        return pool.buy_in * self.entry_count(pool_id)
+
+    def pot_split(self, pool_id: str) -> list[tuple[int, str, int, int]]:
+        """Live projection of the pot payout: [(user_id, name, points, chips)]
+        ordered by points desc. chips=0 for everyone when buy_in is 0."""
+        pool = self.pool_by_id(pool_id)
+        rows = self.standings(pool_id)
+        if pool is None or not rows:
+            return [(uid, name, pts, 0) for uid, name, pts in rows]
+        pot = pool.buy_in * len(rows)
+        payouts = settle_pool(pot, pool.payout_preset,
+                              [(uid, pts) for uid, _, pts in rows])
+        return [(uid, name, pts, payouts.get(uid, 0)) for uid, name, pts in rows]
+
     def chats_for_fixture(self, fixture_id: int) -> list[tuple[str, int]]:
         """[(pool_id, telegram_chat_id)] of pools holding picks on a fixture."""
         with self._conn() as c:
@@ -152,8 +232,8 @@ class Store:
             id=row["id"], name=row["name"], creator_id=row["creator_id"],
             payout_preset=PayoutPreset(row["payout_preset"]),
             language=row["language"], narrator_delay_s=row["narrator_delay_s"],
-            entry_points=row["entry_points"], created_at=row["created_at"],
-            invite_code=row["invite_code"],
+            buy_in=row["buy_in"], visibility=Visibility(row["visibility"]),
+            created_at=row["created_at"], invite_code=row["invite_code"],
         )
 
     # --- entries -------------------------------------------------------------
@@ -204,6 +284,56 @@ class Store:
                 (pool_id,),
             ).fetchall()
         return [(r["user_id"], r["display_name"], r["total"]) for r in rows]
+
+    # --- join requests -------------------------------------------------------
+
+    def create_join_request(self, pool_id: str, user_id: int,
+                            display_name: str) -> None:
+        import time as _time
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO join_requests VALUES (?,?,?,?,?) "
+                "ON CONFLICT(pool_id, user_id) DO UPDATE SET "
+                "status='pending', display_name=excluded.display_name, "
+                "requested_at=excluded.requested_at",
+                (pool_id, user_id, display_name, RequestStatus.PENDING.value,
+                 _time.time()),
+            )
+
+    def request_status(self, pool_id: str, user_id: int) -> RequestStatus | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT status FROM join_requests WHERE pool_id=? AND user_id=?",
+                (pool_id, user_id),
+            ).fetchone()
+        return RequestStatus(row["status"]) if row else None
+
+    def set_request_status(self, pool_id: str, user_id: int,
+                           status: RequestStatus) -> None:
+        with self._conn() as c:
+            c.execute(
+                "UPDATE join_requests SET status=? WHERE pool_id=? AND user_id=?",
+                (status.value, pool_id, user_id),
+            )
+
+    def pending_requests_for_creator(self, creator_id: int) -> list[JoinRequest]:
+        """Open requests across every pool this user created, newest first."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT r.* FROM join_requests r JOIN pools p ON p.id = r.pool_id "
+                "WHERE p.creator_id=? AND r.status='pending' "
+                "ORDER BY r.requested_at DESC",
+                (creator_id,),
+            ).fetchall()
+        return [self._request(r) for r in rows]
+
+    @staticmethod
+    def _request(row: sqlite3.Row) -> JoinRequest:
+        return JoinRequest(
+            pool_id=row["pool_id"], user_id=row["user_id"],
+            display_name=row["display_name"],
+            status=RequestStatus(row["status"]), requested_at=row["requested_at"],
+        )
 
     # --- picks ---------------------------------------------------------------
 

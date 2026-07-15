@@ -1,6 +1,8 @@
+import sqlite3
 import uuid
 
-from src.engine.models import Pick, Pool
+from src.engine.models import (PayoutPreset, Pick, Pool, RequestStatus,
+                               Visibility)
 from src.engine.scoring import settle_1x2
 from src.engine.store import Store
 
@@ -159,3 +161,88 @@ def test_full_pick_cycle_updates_standings(tmp_path):
     assert standings[1] == (2, "Bia", 0)
     assert store.open_picks_for_fixture(900) == []
     assert p1.id != p2.id
+
+
+# --- discovery + pot (Fase 1) ------------------------------------------------
+
+def test_visibility_roundtrips_and_public_pools_filters(tmp_path):
+    store = make_store(tmp_path)
+    pub = store.create_pool(Pool(id=uuid.uuid4().hex, name="Aberto", creator_id=1,
+                                 visibility=Visibility.PUBLIC))
+    req = store.create_pool(Pool(id=uuid.uuid4().hex, name="Pedir", creator_id=1,
+                                 visibility=Visibility.REQUEST))
+    store.create_pool(Pool(id=uuid.uuid4().hex, name="Secreto", creator_id=1,
+                           visibility=Visibility.HIDDEN))
+    assert store.pool_by_id(pub.id).visibility == Visibility.PUBLIC
+    discoverable = {p.id for p in store.public_pools()}
+    assert discoverable == {pub.id, req.id}  # hidden pool stays off the showcase
+
+
+def test_pot_for_and_live_split(tmp_path):
+    store = make_store(tmp_path)
+    pool = store.create_pool(Pool(id=uuid.uuid4().hex, name="Pote", creator_id=1,
+                                  buy_in=100, payout_preset=PayoutPreset.WINNER_TAKES_ALL))
+    store.join(pool.id, 1, "Ana")
+    store.join(pool.id, 2, "Bia")
+    assert store.pot_for(pool.id) == 200  # 100 x 2 entries
+
+    store.place_pick(Pick(id="", pool_id=pool.id, user_id=1, fixture_id=900,
+                          market="1x2", selection="1", odds_decimal=2.0))
+    for pick in store.open_picks_for_fixture(900):
+        store.update_pick(settle_1x2(pick, home_goals=1, away_goals=0))
+    split = store.pot_split(pool.id)
+    assert split[0][:2] == (1, "Ana") and split[0][3] == 200  # winner takes the pot
+    assert split[1][3] == 0
+    assert sum(chips for *_, chips in split) == store.pot_for(pool.id)
+
+
+def test_pot_split_is_zero_for_free_pools(tmp_path):
+    store = make_store(tmp_path)
+    pool = store.create_pool(make_pool())  # buy_in defaults to 0
+    store.join(pool.id, 1, "Ana")
+    assert store.pot_for(pool.id) == 0
+    assert all(chips == 0 for *_, chips in store.pot_split(pool.id))
+
+
+def test_join_request_lifecycle(tmp_path):
+    store = make_store(tmp_path)
+    pool = store.create_pool(Pool(id=uuid.uuid4().hex, name="Pedir", creator_id=1,
+                                  visibility=Visibility.REQUEST))
+    store.join(pool.id, 1, "Host")  # creator
+    assert store.request_status(pool.id, 42) is None
+
+    store.create_join_request(pool.id, 42, "Zé")
+    assert store.request_status(pool.id, 42) == RequestStatus.PENDING
+    pending = store.pending_requests_for_creator(1)
+    assert len(pending) == 1 and pending[0].user_id == 42
+
+    store.set_request_status(pool.id, 42, RequestStatus.APPROVED)
+    assert store.request_status(pool.id, 42) == RequestStatus.APPROVED
+    assert store.pending_requests_for_creator(1) == []  # no longer pending
+
+
+def test_migration_adds_columns_to_legacy_db(tmp_path):
+    """A DB created before buy_in/visibility must gain them with safe defaults."""
+    db = tmp_path / "legacy.sqlite3"
+    con = sqlite3.connect(db)
+    con.executescript(
+        """CREATE TABLE pools (
+             id TEXT PRIMARY KEY, name TEXT NOT NULL, creator_id INTEGER NOT NULL,
+             payout_preset TEXT NOT NULL, language TEXT NOT NULL DEFAULT 'pt-BR',
+             narrator_delay_s INTEGER NOT NULL DEFAULT 0,
+             entry_points INTEGER NOT NULL DEFAULT 1000, created_at REAL NOT NULL,
+             invite_code TEXT NOT NULL UNIQUE, telegram_chat_id INTEGER);""")
+    con.execute("INSERT INTO pools (id, name, creator_id, payout_preset, "
+                "created_at, invite_code) VALUES ('p1','Antigo',1,'top3',0,'abc')")
+    con.commit()
+    con.close()
+
+    store = Store(path=str(db))  # opening runs the migration
+    pool = store.pool_by_id("p1")
+    assert pool is not None
+    assert pool.buy_in == 0
+    assert pool.visibility == Visibility.HIDDEN  # legacy pools stay link-only
+    # and new pools still write fine against the migrated table
+    fresh = store.create_pool(Pool(id="p2", name="Novo", creator_id=1,
+                                   buy_in=50, visibility=Visibility.PUBLIC))
+    assert store.pool_by_id(fresh.id).buy_in == 50
