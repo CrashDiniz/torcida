@@ -80,26 +80,34 @@
   .btn.primary:hover { transform: rotate(-.6deg) translateY(-2px); }
   .btn.ghost { border: 2px solid var(--green); color: var(--green); }
 
-  /* ---------- split-flap board ---------- */
+  /* ---------- split-flap board (light) ---------- */
   .boardwrap { max-width: 760px; margin: 44px auto 0; padding: 0 16px; }
+  .sporttabs { display: flex; gap: 6px; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .sporttab {
+    font-family: 'Courier New', monospace; font-size: 12px; letter-spacing: 1px;
+    padding: 5px 12px; border-radius: 20px; cursor: pointer; background: #FBF6EA;
+    border: 1.5px solid #D8CDB4; color: #6E6552;
+  }
+  .sporttab.on { background: var(--green); color: var(--paper); border-color: var(--green); }
+  .sporttab.soon { opacity: .7; }
   .board {
-    background: var(--board); border-radius: 10px; padding: 22px 18px 16px;
-    box-shadow: 0 6px 0 rgba(0,0,0,.28), inset 0 0 40px rgba(0,0,0,.5);
+    background: #FBF6EA; border-radius: 10px; padding: 20px 18px 15px;
+    border: 2px solid var(--gold); box-shadow: 0 5px 0 rgba(38,34,26,.16);
   }
   .board .title {
-    color: var(--gold); font-size: 11px; letter-spacing: 5px; text-transform: uppercase;
+    color: var(--green); font-size: 11px; letter-spacing: 5px; text-transform: uppercase;
     text-align: center; margin-bottom: 14px; font-family: 'Courier New', monospace;
   }
-  .flaprow { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; }
+  .flaprow { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; min-height: 46px; }
   .flap {
-    width: 34px; height: 46px; background: var(--flap); color: #EDE6D3;
+    width: 34px; height: 46px; background: var(--green); color: var(--paper);
     display: grid; place-items: center; font-family: 'Courier New', monospace;
     font-size: 24px; font-weight: bold; border-radius: 4px; position: relative;
-    box-shadow: inset 0 -2px 0 rgba(255,255,255,.06);
+    box-shadow: inset 0 -2px 0 rgba(0,0,0,.22);
   }
   .flap::after {
     content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
-    background: rgba(0,0,0,.65);
+    background: rgba(0,0,0,.25);
   }
   .flap.space { background: none; box-shadow: none; }
   .flap.space::after { display: none; }
@@ -107,10 +115,16 @@
   @keyframes flip { 0% {transform: rotateX(0);} 50% {transform: rotateX(90deg);} 100% {transform: rotateX(0);} }
   .board .foot {
     margin-top: 14px; display: flex; justify-content: space-between; align-items: center;
-    font-family: 'Courier New', monospace; font-size: 12px; color: #8d8672;
+    font-family: 'Courier New', monospace; font-size: 12px; color: #6E6552; gap: 8px; flex-wrap: wrap;
   }
-  .board .live { color: #FF4D4D; animation: blink 1.2s infinite; letter-spacing: 2px; }
+  .board .live { color: var(--stamp); font-weight: bold; letter-spacing: 1px; }
+  .board .live.on { animation: blink 1.2s infinite; }
   @keyframes blink { 50% { opacity: .3; } }
+  .grouplink {
+    color: var(--green); text-decoration: none; border: 1px solid var(--green);
+    border-radius: 20px; padding: 3px 11px; font-family: Georgia, serif; font-size: 11px;
+    white-space: nowrap;
+  }
 
   /* ---------- sections ---------- */
   section { max-width: 960px; margin: 0 auto; padding: 56px 24px; }
@@ -190,12 +204,15 @@
   </div>
 
   <div class="boardwrap">
+    <div class="sporttabs" id="sporttabs"></div>
     <div class="board">
-      <div class="title" data-en="Official scoreboard · today's round">Placar oficial · rodada de hoje</div>
+      <div class="title" data-en="Live scoreboard · TxODDS feed">Placar ao vivo · feed TxODDS</div>
       <div class="flaprow" id="flapboard"></div>
       <div class="foot">
-        <span id="boardmeta" data-en="WORLD CUP · SEMIFINAL">COPA · SEMIFINAL</span>
-        <span class="live" data-en="● LIVE">● AO VIVO</span>
+        <span id="boardmeta">—</span>
+        <span class="live" id="boardlive" data-en="● LIVE">● AO VIVO</span>
+        <a class="grouplink" href="https://t.me/torcidaapp_bot"
+           data-en="▶ follow in the group">▶ acompanhar no grupo</a>
       </div>
     </div>
   </div>
@@ -314,7 +331,7 @@ function applyLang(lang) {
   document.querySelectorAll('.langbtn').forEach(function (b) {
     b.classList.toggle('on', b.dataset.lang === LANG);
   });
-  if (lines.length) lines[lines.length - 1] = I18N_BOARD[LANG];
+  if (typeof refreshBoard === 'function' && liveData) refreshBoard();  // re-localize board
   try { localStorage.setItem('torcida_lang', LANG); } catch (e) {}
 }
 
@@ -322,20 +339,16 @@ document.querySelectorAll('.langbtn').forEach(function (b) {
   b.addEventListener('click', function () { applyLang(b.dataset.lang); });
 });
 
-/* ---------- split-flap: cycles through today's fixtures with a flip ---------- */
-const lines = [
-  "FRA 0 x 2 ESP",
-  "ING  x  ARG",
-  "LAL 98x102 BOS",
-  "KC 24 x 21 SF",
-  I18N_BOARD[LANG],
-];
+/* ---------- split-flap board driven by the live TxODDS feed ---------- */
 const boardEl = document.getElementById('flapboard');
+const tabsEl  = document.getElementById('sporttabs');
+const metaEl  = document.getElementById('boardmeta');
+const liveEl  = document.getElementById('boardlive');
 const WIDTH = 14;
 let current = " ".repeat(WIDTH);
 
 function pad(s) {
-  s = s.slice(0, WIDTH);
+  s = String(s).slice(0, WIDTH);
   const left = Math.floor((WIDTH - s.length) / 2);
   return " ".repeat(left) + s + " ".repeat(WIDTH - s.length - left);
 }
@@ -361,10 +374,61 @@ function setLine(text) {
   });
   current = target;
 }
+
+const abbr = s => String(s || '?').slice(0, 3).toUpperCase();
+let liveData = null, activeSport = 'soccer', cycleTimer = null, cycleIdx = 0;
+
+function renderTabs() {
+  if (!liveData) return;
+  tabsEl.innerHTML = liveData.sports.map(s =>
+    `<button class="sporttab ${s.id === activeSport ? 'on' : ''} ${s.active ? '' : 'soon'}" `
+    + `data-id="${s.id}">${s.label}</button>`).join('');
+  [...tabsEl.children].forEach(b => b.onclick = () => {
+    activeSport = b.dataset.id; renderTabs(); refreshBoard();
+  });
+}
+function stopCycle() { if (cycleTimer) { clearInterval(cycleTimer); cycleTimer = null; } }
+
+function refreshBoard() {
+  stopCycle();
+  const sport = liveData && liveData.sports.find(s => s.id === activeSport);
+  if (!sport || !sport.active) {          // honest "coming" state for other sports
+    setLine('EM BREVE');
+    metaEl.textContent = LANG === 'en' ? 'TxODDS schema ready' : 'Schema TxODDS pronto';
+    liveEl.style.visibility = 'hidden';
+    return;
+  }
+  const live = (liveData.soccer && liveData.soccer.live) || [];
+  if (live.length) {
+    liveEl.style.visibility = 'visible'; liveEl.classList.add('on');
+    liveEl.textContent = LANG === 'en' ? '● LIVE' : '● AO VIVO';
+    cycleIdx = 0;
+    const show = () => {
+      const g = live[cycleIdx % live.length]; cycleIdx++;
+      setLine(`${abbr(g.home)} ${g.hs} x ${g.as} ${abbr(g.away)}`);
+      metaEl.textContent = g.phase;
+    };
+    show();
+    if (live.length > 1) cycleTimer = setInterval(show, 4200);
+  } else {                                // no live game — show the next kickoff
+    liveEl.classList.remove('on'); liveEl.style.visibility = 'visible';
+    liveEl.textContent = LANG === 'en' ? '○ NEXT' : '○ PRÓXIMO';
+    const nx = liveData.soccer && liveData.soccer.next;
+    setLine(nx ? nx.split(' x ').map(abbr).join(' x ') : 'SEM JOGOS');
+    metaEl.textContent = nx ? (LANG === 'en' ? 'next match' : 'próximo jogo')
+                            : (LANG === 'en' ? 'no games today' : 'sem jogos hoje');
+  }
+}
+
+async function loadLive() {
+  try {
+    const r = await fetch('/api/live', {cache: 'no-store'});
+    if (r.ok) { liveData = await r.json(); renderTabs(); refreshBoard(); }
+  } catch (e) { /* offline: board keeps its last state */ }
+}
 renderInitial();
-let idx = 0;
-setLine(lines[0]);
-setInterval(() => { idx = (idx + 1) % lines.length; setLine(lines[idx]); }, 4200);
+loadLive();
+setInterval(loadLive, 20000);
 
 /* apply saved/default language on load */
 applyLang(LANG);

@@ -21,6 +21,7 @@ from src.engine.models import (PayoutPreset, Pick, PickStatus, Pool,
                                RequestStatus, Visibility)
 from src.engine.odds import parse_snapshot
 from src.engine.scoring import points_for
+from src.engine.settlement import PHASE_LABELS, extract_score
 from src.engine.store import Store
 from src.ingest.txline import TxLineClient
 
@@ -345,6 +346,65 @@ async def approve_request(req: ApproveRequest):
         return {"ok": True, "status": "approved"}
     store.set_request_status(pool.id, req.user_id, RequestStatus.DENIED)
     return {"ok": True, "status": "denied"}
+
+
+# --- live scoreboard for the landing page ------------------------------------
+
+_live_cache: tuple[float, dict] = (0.0, {})
+LIVE_TTL_S = 15
+LIVE_PHASES = {"h1", "ht", "h2", "et1", "htet", "et2", "pe", "i"}
+SPORTS_TABS = [
+    {"id": "soccer", "label": "⚽ Futebol", "active": True},
+    {"id": "basket", "label": "🏀 Basquete", "active": False},
+    {"id": "nfl", "label": "🏈 NFL", "active": False},
+]
+
+
+async def _live_payload() -> dict:
+    """Live World Cup scores for the landing board — cached so many visitors
+    share one upstream fetch. Other sports are declared but inactive: the
+    TxODDS schema already carries them, we just don't ingest them yet."""
+    global _live_cache
+    ts, cached = _live_cache
+    if cached and time.time() - ts < LIVE_TTL_S:
+        return cached
+    now = time.time()
+    live: list[dict] = []
+    for f in await _fixtures():
+        if (f.get("StartTime") or 0) / 1000 > now:
+            continue  # not kicked off yet
+        try:
+            state = extract_score(await txline.scores_snapshot(f["FixtureId"]))
+        except Exception:
+            state = None
+        if state is None or state.finished or state.phase not in LIVE_PHASES:
+            continue
+        odds = None
+        try:
+            od = parse_snapshot(await txline.odds_snapshot(f["FixtureId"]))
+            odds = {"home": round(od.home, 2), "draw": round(od.draw, 2),
+                    "away": round(od.away, 2)}
+        except Exception:
+            pass
+        live.append({
+            "home": f.get("Participant1", "?"), "away": f.get("Participant2", "?"),
+            "hs": state.home_goals or 0, "as": state.away_goals or 0,
+            "phase": PHASE_LABELS.get(state.phase, "🔴 Ao vivo"), "odds": odds,
+        })
+    nxt = None
+    if not live:
+        upcoming = [f for f in await _fixtures() if (f.get("StartTime") or 0) / 1000 > now]
+        if upcoming:
+            nf = min(upcoming, key=lambda f: f.get("StartTime") or 0)
+            nxt = f"{nf.get('Participant1', '?')} x {nf.get('Participant2', '?')}"
+    payload = {"sports": SPORTS_TABS, "soccer": {"live": live, "next": nxt}}
+    _live_cache = (time.time(), payload)
+    return payload
+
+
+@app.get("/api/live")
+async def live() -> dict:
+    return await _live_payload()
 
 
 PAGE = """<!doctype html>
