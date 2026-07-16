@@ -569,6 +569,35 @@ def _record_opening(fixture_id: int, odds) -> None:
                                   time.time())
 
 
+async def _verify_onchain(fixture_id: int) -> dict | None:
+    """Prove the settled final score against the on-chain TxLINE Merkle root
+    (validateStatV2) and land the proof as a real devnet tx. Runs the node
+    script in onchain/; returns its JSON or None. Never raises."""
+    import json as _json
+    script = os.path.join(os.path.dirname(__file__), "..", "..",
+                          "onchain", "verify_result.js")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "node", os.path.abspath(script), "--fixture", str(fixture_id), "--send",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=120)
+        result = _json.loads(out.decode().strip().splitlines()[-1])
+        if "error" in result:
+            log.warning("on-chain verify error for %s: %s", fixture_id,
+                        result["error"])
+            return None
+        store.record_verification(
+            fixture_id, result.get("valid", False), result.get("txSig"),
+            result.get("home", 0), result.get("away", 0), result.get("seq"),
+            time.time())
+        log.info("on-chain verify %s: valid=%s tx=%s", fixture_id,
+                 result.get("valid"), result.get("txSig"))
+        return result
+    except Exception:
+        log.warning("on-chain verify failed for %s", fixture_id, exc_info=True)
+        return None
+
+
 async def _odds_move_note(fixture_id: int, label: str, h: int, a: int) -> str | None:
     """'a odd da Argentina despencou de 4.0 pra 1.5 — e só o Pedro segurou':
     compares the leading side's current price against the stored opening line.
@@ -1250,6 +1279,19 @@ def _make_announcers(bot: Bot):
                 pot=store.pot_for(pool_id) if has_pot else 0)
             if ogg:
                 await _send_voice_note(bot, [chat_id], ogg)
+
+        async def _verify_and_announce() -> None:
+            result = await _verify_onchain(state.fixture_id)
+            if not result or not result.get("valid") or not result.get("explorer"):
+                return
+            text = ("🔐 <b>Resultado verificado on-chain</b> — o placar final foi "
+                    "provado contra a Merkle root da TxLINE na Solana "
+                    "(validateStatV2), sem árbitro humano.\n"
+                    f'<a href="{result["explorer"]}">🔎 Ver a prova no explorer</a>')
+            for _, chat_id in store.chats_for_fixture(state.fixture_id):
+                await _safe_send(bot, chat_id, text)
+
+        _bg(asyncio.create_task(_verify_and_announce()))
 
     async def on_phase(state: FixtureState, label: str) -> None:
         chats = store.chats_for_fixture(state.fixture_id)

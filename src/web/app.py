@@ -117,10 +117,17 @@ async def _state_payload(uid: int, first_name: str) -> dict:
             pts = (p.points_awarded if p.status == PickStatus.WON
                    else points_for(p.odds_decimal) if p.status == PickStatus.OPEN
                    else 0)
+            verification = (store.verification(p.fixture_id)
+                            if p.status != PickStatus.OPEN else None)
+            verify_url = (
+                f"https://explorer.solana.com/tx/{verification['tx_sig']}?cluster=devnet"
+                if verification and verification["valid"] and verification["tx_sig"]
+                else None)
             picks.append({"fixture": label,
                           "selection": _selection_name(p.selection, label),
                           "odds": f"{p.odds_decimal:.2f}", "points": pts,
-                          "emoji": emoji, "status": status})
+                          "emoji": emoji, "status": status,
+                          "verify_url": verify_url})
         fixtures = []
         for f in upcoming:
             home, away = pt(f.get("Participant1", "?")), pt(f.get("Participant2", "?"))
@@ -698,6 +705,9 @@ function renderMine() {
           <div class="fx">${p.emoji} ${esc(p.fixture)}</div>
           <div>➜ <span class="sel">${esc(p.selection)}</span> @ ${p.odds}</div>
           <div class="meta">${p.status} · ${p.points} pts</div>
+          ${p.verify_url ? `<div class="meta">🔐 <a href="${p.verify_url}"
+            target="_blank" rel="noopener">resultado verificado on-chain
+            (Merkle proof TxLINE)</a></div>` : ''}
         </div>`).join('')
         : '<p class="empty">Nenhum palpite ainda — toca num time aí em cima! 👆</p>'}
       <div class="stamp">Válido até o apito final</div>

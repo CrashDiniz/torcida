@@ -73,6 +73,15 @@ CREATE TABLE IF NOT EXISTS chat_topics (
   thread_id INTEGER NOT NULL,
   PRIMARY KEY (chat_id, topic)
 );
+CREATE TABLE IF NOT EXISTS fixture_verifications (
+  fixture_id INTEGER PRIMARY KEY,
+  valid INTEGER NOT NULL,
+  tx_sig TEXT,
+  home INTEGER NOT NULL,
+  away INTEGER NOT NULL,
+  seq INTEGER,
+  verified_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS fixture_opening_odds (
   fixture_id INTEGER PRIMARY KEY,
   home REAL NOT NULL,
@@ -414,6 +423,23 @@ class Store:
                 (fixture_id,),
             ).fetchall()
         return [(r["name"], r["selection"], r["odds"]) for r in rows]
+
+    def record_verification(self, fixture_id: int, valid: bool, tx_sig: str | None,
+                            home: int, away: int, seq: int | None, ts: float) -> None:
+        """On-chain Merkle-proof verification of a settled result (validateStatV2)."""
+        with self._conn() as c:
+            c.execute(
+                """INSERT OR REPLACE INTO fixture_verifications
+                   (fixture_id, valid, tx_sig, home, away, seq, verified_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (fixture_id, int(valid), tx_sig, home, away, seq, ts))
+
+    def verification(self, fixture_id: int) -> dict | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM fixture_verifications WHERE fixture_id=?",
+                (fixture_id,)).fetchone()
+        return dict(row) if row else None
 
     def record_opening_odds(self, fixture_id: int, home: float, draw: float,
                             away: float, ts: float) -> None:

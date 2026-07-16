@@ -1,0 +1,13 @@
+{
+  "name": "torcida-onchain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "On-chain verification of settled results via TxLINE Merkle proofs (validateStatV2)",
+  "main": "verify_result.js",
+  "dependencies": {
+    "@coral-xyz/anchor": "0.32.1",
+    "@solana/web3.js": "^1.91.9",
+    "axios": "^1.12.0",
+    "bn.js": "^5.2.1"
+  }
+}

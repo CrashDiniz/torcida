@@ -263,3 +263,11 @@ def test_named_picks_include_odds(tmp_path):
     store.place_pick(Pick(id="", pool_id=pool.id, user_id=42, fixture_id=900,
                           market="1x2", selection="2", odds_decimal=4.0))
     assert store.named_picks_for_fixture(900) == [("Pedro", "2", 4.0)]
+
+
+def test_verification_roundtrip(tmp_path):
+    store = make_store(tmp_path)
+    assert store.verification(900) is None
+    store.record_verification(900, True, "sig123", 1, 2, 962, ts=1000.0)
+    v = store.verification(900)
+    assert v["valid"] == 1 and v["tx_sig"] == "sig123" and v["seq"] == 962
