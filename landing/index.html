@@ -33,53 +33,59 @@
   }
   .display { font-family: 'Graduate', Georgia, serif; }
 
-  /* ---------- topbar: centered logo, links bar below ---------- */
+  /* ---------- topbar: [T]ORCIDA wordmark; flap-tile navbar under the rule --- */
   nav {
     background: var(--green); color: var(--paper);
     border-bottom: 3px double var(--gold);
-    padding: 16px 16px 0;
+    padding: 18px 16px;
   }
   nav .brand {
-    display: flex; align-items: center; justify-content: center; gap: 12px;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
   }
   nav .crest {
-    width: 32px; height: 42px; border: 2px solid var(--gold); border-radius: 6px;
+    width: 46px; height: 60px; border: 2.5px solid var(--gold); border-radius: 8px;
     display: grid; place-items: center; background: var(--flap);
-    position: relative; box-shadow: inset 0 -3px 0 rgba(0,0,0,.4);
+    position: relative; box-shadow: inset 0 -4px 0 rgba(0,0,0,.4);
   }
   nav .crest::after {
-    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px;
     background: rgba(0,0,0,.55);
   }
-  nav .crest span { font-size: 20px; color: var(--paper); line-height: 1; }
-  nav .name { font-size: 24px; letter-spacing: 4px; }
-  nav .navbar {
-    display: flex; align-items: center; justify-content: center; gap: 16px;
-    flex-wrap: wrap; padding: 12px 0 14px;
+  nav .crest span { font-size: 33px; color: var(--paper); line-height: 1; }
+  nav .name { font-size: 38px; letter-spacing: 6px; }
+  .navstrip {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    flex-wrap: wrap; padding: 12px 10px;
+    border-bottom: 1px solid #E0D6BF; background: rgba(38,34,26,.02);
   }
-  nav .navbar a.navlink {
-    color: var(--paper); text-decoration: none; font-size: 15px;
-    letter-spacing: 1px; opacity: .85; border-bottom: 1px dotted var(--gold);
+  .navbtn {
+    display: inline-block; background: var(--board); color: var(--paper);
+    text-decoration: none; padding: 9px 16px 11px; border-radius: 6px;
+    font-size: 12.5px; letter-spacing: 1.5px; position: relative;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,.45); white-space: nowrap;
   }
-  nav .navbar a.navlink:hover { opacity: 1; }
-  nav a.cta {
-    background: var(--stamp); color: #fff; text-decoration: none;
-    padding: 7px 16px; border-radius: 4px; font-size: 14px; letter-spacing: 1px;
-    box-shadow: 2px 2px 0 rgba(0,0,0,.35); white-space: nowrap;
+  .navbtn::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+    background: rgba(241,233,216,.14); pointer-events: none;
   }
-  .lang { display: flex; gap: 3px; }
+  .navbtn:hover { transform: translateY(-1px); }
+  .navbtn.cta { background: var(--stamp); box-shadow: inset 0 -3px 0 rgba(0,0,0,.3); }
+  .lang { display: flex; gap: 4px; }
   .langbtn {
-    background: transparent; color: var(--paper); border: 1px solid var(--gold);
-    padding: 4px 9px; font-size: 12px; letter-spacing: 1px; cursor: pointer;
-    border-radius: 3px; font-family: 'Graduate', serif; opacity: .55; line-height: 1;
+    background: var(--board); color: var(--paper); border: none;
+    padding: 9px 12px 11px; font-size: 12.5px; letter-spacing: 1px; cursor: pointer;
+    border-radius: 6px; font-family: 'Graduate', serif; opacity: .55; line-height: 1;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,.45); position: relative;
   }
-  .langbtn.on { background: var(--gold); color: var(--green-dk); opacity: 1; }
+  .langbtn.on { background: var(--gold); color: var(--green-dk); opacity: 1;
+                box-shadow: inset 0 -3px 0 rgba(0,0,0,.2); }
   @media (max-width: 480px) {
-    nav { padding: 12px 10px 0; }
-    nav .name { font-size: 19px; letter-spacing: 3px; }
-    nav .navbar { gap: 10px; padding: 10px 0 12px; }
-    nav .navbar a.navlink { font-size: 13.5px; }
-    nav a.cta { padding: 6px 12px; font-size: 13px; }
+    nav { padding: 14px 10px; }
+    nav .crest { width: 36px; height: 47px; }
+    nav .crest span { font-size: 25px; }
+    nav .name { font-size: 28px; letter-spacing: 5px; }
+    .navstrip { gap: 7px; padding: 10px 8px; }
+    .navbtn, .langbtn { padding: 8px 11px 10px; font-size: 11.5px; }
   }
 
   /* ---------- hero ---------- */
@@ -212,21 +218,21 @@
 <body>
 
 <nav>
-  <div class="brand">
+  <div class="brand" aria-label="Torcida">
     <div class="crest"><span class="display">T</span></div>
-    <div class="name display">TORCIDA</div>
-  </div>
-  <div class="navbar">
-    <a class="navlink" href="#como" data-en="How it works">Como funciona</a>
-    <a class="navlink" href="/retro" data-en="📋 Form guide">📋 Retrospecto</a>
-    <div class="lang" role="group" aria-label="Language">
-      <button class="langbtn" data-lang="pt" type="button">PT</button>
-      <button class="langbtn" data-lang="en" type="button">EN</button>
-    </div>
-    <a class="cta display" href="https://t.me/+B0SVEoGVrnxlYWFh"
-       data-en="Join the group">Entrar no grupo</a>
+    <div class="name display">ORCIDA</div>
   </div>
 </nav>
+<div class="navstrip">
+  <a class="navbtn display" href="#como" data-en="How it works">Como funciona</a>
+  <a class="navbtn display" href="/retro" data-en="📋 Form guide">📋 Retrospecto</a>
+  <div class="lang" role="group" aria-label="Language">
+    <button class="langbtn" data-lang="pt" type="button">PT</button>
+    <button class="langbtn" data-lang="en" type="button">EN</button>
+  </div>
+  <a class="navbtn cta display" href="https://t.me/+B0SVEoGVrnxlYWFh"
+     data-en="Join the group">Entrar no grupo</a>
+</div>
 
 <div class="hero">
   <div class="est display"
