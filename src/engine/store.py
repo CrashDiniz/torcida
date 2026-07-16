@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -89,6 +90,40 @@ CREATE TABLE IF NOT EXISTS fixture_opening_odds (
   draw REAL NOT NULL,
   away REAL NOT NULL,
   recorded_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hilo_questions (
+  id TEXT PRIMARY KEY,
+  pool_id TEXT NOT NULL REFERENCES pools(id),
+  fixture_id INTEGER NOT NULL,
+  stat TEXT NOT NULL,
+  line REAL NOT NULL,
+  base_value INTEGER NOT NULL,
+  created_at REAL NOT NULL,
+  resolve_at REAL NOT NULL,
+  chat_id INTEGER,
+  thread_id INTEGER,
+  test INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'open',
+  result TEXT,
+  final_value INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_hilo_pool ON hilo_questions(pool_id, status);
+CREATE TABLE IF NOT EXISTS hilo_answers (
+  question_id TEXT NOT NULL REFERENCES hilo_questions(id),
+  user_id INTEGER NOT NULL,
+  display_name TEXT NOT NULL,
+  choice TEXT NOT NULL,
+  answered_at REAL NOT NULL,
+  PRIMARY KEY (question_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS hilo_streaks (
+  pool_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  display_name TEXT NOT NULL,
+  streak INTEGER NOT NULL DEFAULT 0,
+  best INTEGER NOT NULL DEFAULT 0,
+  points INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (pool_id, user_id)
 );
 """
 
@@ -541,3 +576,114 @@ class Store:
             placed_at=row["placed_at"], status=PickStatus(row["status"]),
             points_awarded=row["points_awarded"],
         )
+
+    # --- hi-lo ("Pulso da Torcida") -------------------------------------------
+
+    def create_hilo(self, q) -> None:
+        """q: engine.hilo.HiloQuestion"""
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO hilo_questions (id, pool_id, fixture_id, stat, line,"
+                " base_value, created_at, resolve_at, chat_id, thread_id, test,"
+                " status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (q.id, q.pool_id, q.fixture_id, q.stat, q.line, q.base_value,
+                 q.created_at, q.resolve_at, q.chat_id, q.thread_id,
+                 1 if q.test else 0, q.status),
+            )
+
+    def hilo_question(self, question_id: str) -> dict | None:
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM hilo_questions WHERE id=?",
+                            (question_id,)).fetchone()
+        return dict(row) if row else None
+
+    def open_hilo_for_pool(self, pool_id: str) -> dict | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT * FROM hilo_questions WHERE pool_id=? AND status='open' "
+                "ORDER BY created_at DESC LIMIT 1", (pool_id,)).fetchone()
+        return dict(row) if row else None
+
+    def open_hilo_questions(self) -> list[dict]:
+        """All unresolved questions — rescheduled after a bot restart."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT * FROM hilo_questions WHERE status='open'").fetchall()
+        return [dict(r) for r in rows]
+
+    def answer_hilo(self, question_id: str, user_id: int, display_name: str,
+                    choice: str) -> str | None:
+        """Record/replace an answer while the question is open. Returns the
+        previous choice ('' if this is the first answer), or None if closed."""
+        with self._conn() as c:
+            q = c.execute("SELECT status, resolve_at FROM hilo_questions WHERE id=?",
+                          (question_id,)).fetchone()
+            if q is None or q["status"] != "open" or time.time() >= q["resolve_at"]:
+                return None  # settled or past the deadline (no last-second snipes)
+            prev = c.execute(
+                "SELECT choice FROM hilo_answers WHERE question_id=? AND user_id=?",
+                (question_id, user_id)).fetchone()
+            c.execute(
+                "INSERT INTO hilo_answers VALUES (?,?,?,?,?) "
+                "ON CONFLICT(question_id, user_id) DO UPDATE SET "
+                "choice=excluded.choice, answered_at=excluded.answered_at",
+                (question_id, user_id, display_name, choice, time.time()),
+            )
+        return prev["choice"] if prev else ""
+
+    def hilo_answer_count(self, question_id: str) -> int:
+        with self._conn() as c:
+            row = c.execute("SELECT COUNT(*) AS n FROM hilo_answers "
+                            "WHERE question_id=?", (question_id,)).fetchone()
+        return row["n"]
+
+    def settle_hilo(self, question_id: str, result: str,
+                    final_value: int) -> tuple[list[tuple[str, int]],
+                                               list[tuple[str, int]]]:
+        """Close the question, update streaks. Returns (winners, losers) as
+        (name, streak-after) lists; winner points = 100 × new streak."""
+        from .hilo import payout
+        winners: list[tuple[str, int]] = []
+        losers: list[tuple[str, int]] = []
+        with self._conn() as c:
+            q = c.execute("SELECT * FROM hilo_questions WHERE id=? AND "
+                          "status='open'", (question_id,)).fetchone()
+            if q is None:
+                return winners, losers
+            c.execute("UPDATE hilo_questions SET status='settled', result=?, "
+                      "final_value=? WHERE id=?",
+                      (result, final_value, question_id))
+            answers = c.execute("SELECT * FROM hilo_answers WHERE question_id=?",
+                                (question_id,)).fetchall()
+            for a in answers:
+                c.execute(
+                    "INSERT INTO hilo_streaks (pool_id, user_id, display_name) "
+                    "VALUES (?,?,?) ON CONFLICT(pool_id, user_id) DO UPDATE SET "
+                    "display_name=excluded.display_name",
+                    (q["pool_id"], a["user_id"], a["display_name"]))
+                if a["choice"] == result:
+                    row = c.execute(
+                        "SELECT streak FROM hilo_streaks WHERE pool_id=? AND "
+                        "user_id=?", (q["pool_id"], a["user_id"])).fetchone()
+                    new_streak = (row["streak"] if row else 0) + 1
+                    c.execute(
+                        "UPDATE hilo_streaks SET streak=?, best=MAX(best, ?), "
+                        "points=points+? WHERE pool_id=? AND user_id=?",
+                        (new_streak, new_streak, payout(new_streak),
+                         q["pool_id"], a["user_id"]))
+                    winners.append((a["display_name"], new_streak))
+                else:
+                    c.execute("UPDATE hilo_streaks SET streak=0 WHERE pool_id=? "
+                              "AND user_id=?", (q["pool_id"], a["user_id"]))
+                    losers.append((a["display_name"], 0))
+        return winners, losers
+
+    def hilo_board(self, pool_id: str, limit: int = 5) -> list[tuple[str, int, int, int]]:
+        """(name, current streak, best streak, points), hottest first."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT display_name, streak, best, points FROM hilo_streaks "
+                "WHERE pool_id=? ORDER BY streak DESC, points DESC LIMIT ?",
+                (pool_id, limit)).fetchall()
+        return [(r["display_name"], r["streak"], r["best"], r["points"])
+                for r in rows]

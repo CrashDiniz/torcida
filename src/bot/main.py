@@ -26,6 +26,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (CallbackQuery, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message, WebAppInfo)
 
+from ..engine import hilo
 from ..engine.models import PayoutPreset, Pick, PickStatus, Pool, Visibility
 from ..engine.teams import pt
 from ..engine.odds import parse_snapshot
@@ -1524,6 +1525,192 @@ async def _consume_scores(service: SettlementService, bot: Bot) -> None:
             log.warning("incident announce failed", exc_info=True)
 
 
+# --- hi-lo ("Pulso da Torcida") ------------------------------------------------
+# The sponsor's 3rd showcase idea, playable in-chat: higher/lower on a live
+# match stat, settled by the TxLINE feed with no human referee. Separate
+# streak board — never touches the 1X2 pool scoring.
+
+HILO_STAT_EMOJI = {"goals": "⚽", "corners": "🚩", "cards": "🟨"}
+HILO_STAT_ARGS = {"gols": "goals", "escanteios": "corners", "cartoes": "cards",
+                  "cartões": "cards"}
+
+
+def _live_fixture_id() -> int | None:
+    """The fixture a Hi-Lo question hangs on: whatever is live right now
+    (same signals as _live_score_lines)."""
+    if settlement is not None:
+        for st in settlement._states.values():
+            if not st.settled and not st.finished:
+                return st.fixture_id
+    now = time.time()
+    for fid, start in _fixture_starts.items():
+        st = settlement._states.get(fid) if settlement is not None else None
+        done = st is not None and (st.finished or st.settled)
+        if 0 <= now - start <= 3 * 3600 and not done:
+            return fid
+    return None
+
+
+async def _last_started_fixture_id() -> int | None:
+    """Most recent kicked-off fixture (test mode runs on finished games)."""
+    assert txline is not None
+    now = time.time()
+    fx = await txline.fixtures(start_epoch_day=int(now // 86400) - 4)
+    started = [f for f in fx if (f.get("StartTime") or 0) / 1000 <= now]
+    if not started:
+        return None
+    return max(started, key=lambda f: f.get("StartTime") or 0)["FixtureId"]
+
+
+def _hilo_keyboard(question_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📈 MAIS", callback_data=f"hilo:{question_id}:hi"),
+        InlineKeyboardButton(text="📉 MENOS", callback_data=f"hilo:{question_id}:lo"),
+    ]])
+
+
+@router.message(Command("hilo"))
+async def hilo_cmd(message: Message, command: CommandObject) -> None:
+    if message.chat.type == "private":
+        await message.answer("O Hi-Lo é jogado no grupo — chama lá! 🎲")
+        return
+    pool = _pool_for_chat(message.chat.id)
+    if pool is None:
+        await message.answer("Cria um bolão primeiro com /novo — aí o Hi-Lo abre. 🎲")
+        return
+    if store.open_hilo_for_pool(pool.id) is not None:
+        await message.answer("🎲 Já tem uma pergunta Hi-Lo aberta — resolve essa primeiro!")
+        return
+
+    args = (command.args or "").lower().split()
+    test = "teste" in args
+    stat = next((HILO_STAT_ARGS[a] for a in args if a in HILO_STAT_ARGS), None)
+    if stat is None:
+        import random
+        stat = random.choice(list(hilo.TEMPLATES))
+
+    fid = _live_fixture_id()
+    if fid is None:
+        if not test:
+            hint = await _next_fixture_hint()
+            await message.answer(
+                "🎲 O Hi-Lo é in-play — precisa de bola rolando.\n"
+                + (f"⏱ {html.escape(hint)}" if hint else "")
+                + "\n<i>(Pra experimentar agora: /hilo teste)</i>",
+                parse_mode="HTML")
+            return
+        fid = await _last_started_fixture_id()
+        if fid is None:
+            await message.answer("Feed sem jogos pra testar agora. 🤷")
+            return
+
+    assert txline is not None
+    totals = None
+    try:
+        totals = hilo.snapshot_totals(await txline.scores_snapshot(fid))
+    except Exception:
+        log.warning("hilo baseline snapshot failed", exc_info=True)
+    base = (totals or {}).get(stat, 0)
+
+    q = hilo.make_question(pool.id, fid, stat, base,
+                           chat_id=message.chat.id,
+                           thread_id=message.message_thread_id, test=test)
+    store.create_hilo(q)
+
+    label = await _fixture_label(fid)
+    stat_pt = hilo.TEMPLATES[stat]["pt"]
+    minutes = int((q.resolve_at - time.time()) / 60) or 1
+    horizon = f"{minutes} min" if not test else "90 segundos (🧪 teste)"
+    await message.answer(
+        f"🎲 <b>HI-LO · Pulso da Torcida</b>{' 🧪' if test else ''}\n"
+        f"⚽ {html.escape(label)}\n\n"
+        f"{HILO_STAT_EMOJI[stat]} Total de <b>{stat_pt}</b> do jogo daqui a "
+        f"<b>{horizon}</b>:\n"
+        f"<b>MAIS ou MENOS que {q.line:g}?</b>  (agora: {base})\n\n"
+        f"📈 Acertou: <b>100 pts × sua sequência</b> · errou: sequência zera.\n"
+        f"🔐 Resolve sozinho pelo feed TxODDS — sem juiz, sem choro.",
+        parse_mode="HTML", reply_markup=_hilo_keyboard(q.id))
+    _bg(asyncio.create_task(_hilo_resolver(message.bot, q.id)))
+
+
+@router.callback_query(F.data.startswith("hilo:"))
+async def hilo_answer_cb(callback: CallbackQuery) -> None:
+    _, question_id, choice = callback.data.split(":")
+    q = store.hilo_question(question_id)
+    if q is None:
+        await _answer(callback, "Essa pergunta não existe mais. 🤔")
+        return
+    user = callback.from_user
+    store.join(q["pool_id"], user.id, user.first_name or str(user.id))
+    prev = store.answer_hilo(question_id, user.id,
+                             user.first_name or str(user.id), choice)
+    word = "MAIS 📈" if choice == "hi" else "MENOS 📉"
+    if prev is None:
+        await _answer(callback, "⛔ Fechou — essa pergunta já está resolvendo!",
+                      show_alert=True)
+    elif prev == "":
+        await _answer(callback, f"Anotado: {word} que {q['line']:g}. Segura a torcida! 🤞")
+    elif prev != choice:
+        await _answer(callback, f"Trocado: agora você diz {word}. 🔁")
+    else:
+        await _answer(callback, f"Você já tinha dito {word} 😉")
+
+
+async def _hilo_resolver(bot: Bot, question_id: str) -> None:
+    """Sleep until the deadline, read the feed, settle, announce. Survives
+    restarts via _reschedule_hilo (open questions are re-armed from the DB)."""
+    q = store.hilo_question(question_id)
+    if q is None or q["status"] != "open":
+        return
+    await asyncio.sleep(max(0.0, q["resolve_at"] - time.time()))
+    totals = None
+    for _ in range(3):
+        try:
+            assert txline is not None
+            totals = hilo.snapshot_totals(await txline.scores_snapshot(q["fixture_id"]))
+            if totals is not None:
+                break
+        except Exception:
+            log.warning("hilo settle snapshot failed", exc_info=True)
+        await asyncio.sleep(15)
+    value = (totals or {}).get(q["stat"], q["base_value"])
+    result = hilo.settle(q["line"], value)
+    winners, losers = store.settle_hilo(question_id, result, value)
+
+    label = await _fixture_label(q["fixture_id"])
+    stat_pt = hilo.TEMPLATES[q["stat"]]["pt"]
+    word = "MAIS 📈" if result == "hi" else "MENOS 📉"
+    lines = [f"🎲 <b>HI-LO resolvido</b> · {html.escape(label)}",
+             f"{HILO_STAT_EMOJI[q['stat']]} {stat_pt}: <b>{value}</b> → "
+             f"deu <b>{word}</b> que {q['line']:g}!"]
+    if winners:
+        lines.append("🔥 " + " · ".join(
+            f"<b>{html.escape(n)}</b> (seq {s}, +{hilo.payout(s)} pts)"
+            for n, s in winners))
+    if losers:
+        lines.append("💀 zeraram: " + ", ".join(html.escape(n) for n, _ in losers))
+    if not winners and not losers:
+        lines.append("😴 Ninguém encarou essa.")
+    if winners or losers:
+        hot = " · ".join(f"{'🔥' if s > 1 else ''}{s} {html.escape(n)}"
+                         for n, s, _, _ in store.hilo_board(q["pool_id"]) if s > 0)
+        lines.append("\n🏆 Sequências: " + (hot or "todas zeradas 🧊"))
+    chat_id = q["chat_id"]
+    if chat_id:
+        try:
+            await bot.send_message(chat_id, "\n".join(lines), parse_mode="HTML",
+                                   message_thread_id=q["thread_id"])
+        except Exception:
+            await _safe_send(bot, chat_id, "\n".join(lines))
+
+
+def _reschedule_hilo(bot: Bot) -> None:
+    """Re-arm resolvers for questions that were open across a restart."""
+    for q in store.open_hilo_questions():
+        _bg(asyncio.create_task(_hilo_resolver(bot, q["id"])))
+        log.info("hilo question %s re-armed", q["id"])
+
+
 async def _log_update(handler, event, data):
     if (getattr(event, "message", None) and event.message.text
             and event.message.from_user):
@@ -1544,6 +1731,7 @@ async def _log_update(handler, event, data):
 GROUP_COMMANDS = [
     ("jogos", "palpitar nos próximos jogos"),
     ("aovivo", "placar ao vivo do jogo"),
+    ("hilo", "🎲 mais ou menos? (in-play)"),
     ("placar", "classificação do bolão"),
     ("app", "abrir o app 🎫"),
 ]
@@ -1570,6 +1758,7 @@ async def main() -> None:
     settlement = SettlementService(store, on_goal=on_goal, on_final=on_final,
                                    on_phase=on_phase)
     await _rehydrate_scores(settlement)  # recover score after downtime/restart
+    _reschedule_hilo(bot)                # re-arm hi-lo questions left open
     scores_task = asyncio.create_task(_consume_scores(settlement, bot))
     kickoff_task = asyncio.create_task(_kickoff_alerts(bot))
     vitrine_task = asyncio.create_task(_vitrine_loop(bot))
