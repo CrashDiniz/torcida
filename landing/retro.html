@@ -24,24 +24,64 @@
   .display { font-family: 'Graduate', Georgia, serif; }
 
   nav {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 24px; border-bottom: 3px double var(--gold);
     background: var(--green); color: var(--paper);
+    border-bottom: 3px double var(--gold);
+    padding: 18px 16px;
   }
-  nav .brand { display: flex; align-items: center; gap: 10px; color: var(--paper); text-decoration: none; }
+  nav .brand {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    color: var(--paper); text-decoration: none;
+  }
   nav .crest {
-    width: 38px; height: 38px; border: 2px solid var(--paper); border-radius: 50%;
-    display: grid; place-items: center; font-size: 18px;
-    background: repeating-linear-gradient(90deg, var(--green) 0 5px, var(--green-dk) 5px 10px);
+    width: 46px; height: 60px; border: 2.5px solid var(--gold); border-radius: 8px;
+    display: grid; place-items: center; background: #1E1B15;
+    position: relative; box-shadow: inset 0 -4px 0 rgba(0,0,0,.4);
   }
-  nav .name { font-size: 20px; letter-spacing: 3px; }
-  .lang { display: flex; gap: 3px; }
+  nav .crest::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px;
+    background: rgba(0,0,0,.55);
+  }
+  nav .crest span { font-size: 33px; color: var(--paper); line-height: 1; }
+  nav .name { font-size: 38px; letter-spacing: 6px; }
+  .navstrip {
+    position: relative;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    flex-wrap: wrap; padding: 12px 96px;
+    border-bottom: 1px solid #E0D6BF; background: rgba(38,34,26,.02);
+  }
+  .navstrip .lang { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); }
+  .navbtn {
+    display: inline-block; background: #14120E; color: var(--paper);
+    text-decoration: none; padding: 9px 16px 11px; border-radius: 6px;
+    font-size: 12.5px; letter-spacing: 1.5px; position: relative;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,.45); white-space: nowrap;
+    min-width: 176px; text-align: center;
+  }
+  .navbtn::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+    background: rgba(241,233,216,.14); pointer-events: none;
+  }
+  .navbtn:hover { transform: translateY(-1px); }
+  .navbtn.cta { background: var(--stamp); box-shadow: inset 0 -3px 0 rgba(0,0,0,.3); }
+  .lang { display: flex; gap: 4px; }
   .langbtn {
-    background: transparent; color: var(--paper); border: 1px solid var(--gold);
-    padding: 4px 9px; font-size: 12px; letter-spacing: 1px; cursor: pointer;
-    border-radius: 3px; font-family: 'Graduate', serif; opacity: .55; line-height: 1;
+    background: #14120E; color: var(--paper); border: none;
+    padding: 9px 12px 11px; font-size: 12.5px; letter-spacing: 1px; cursor: pointer;
+    border-radius: 6px; font-family: 'Graduate', serif; opacity: .55; line-height: 1;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,.45); position: relative;
   }
-  .langbtn.on { background: var(--gold); color: var(--green-dk); opacity: 1; }
+  .langbtn.on { background: var(--gold); color: var(--green-dk); opacity: 1;
+                box-shadow: inset 0 -3px 0 rgba(0,0,0,.2); }
+  @media (max-width: 480px) {
+    nav { padding: 14px 10px; }
+    nav .crest { width: 36px; height: 47px; }
+    nav .crest span { font-size: 25px; }
+    nav .name { font-size: 28px; letter-spacing: 5px; }
+    .navstrip { gap: 7px; padding: 10px 8px; }
+    .navstrip .lang { position: static; transform: none; }
+    .navbtn, .langbtn { padding: 8px 11px 10px; font-size: 11.5px; }
+    .navbtn { min-width: 0; }
+  }
 
   main { max-width: 760px; margin: 0 auto; padding: 40px 16px 30px; }
   .est {
@@ -104,15 +144,21 @@
 </head>
 <body>
 <nav>
-  <a class="brand" href="/">
-    <div class="crest">⚽</div>
-    <div class="name display">TORCIDA</div>
+  <a class="brand" href="/" aria-label="Torcida">
+    <div class="crest"><span class="display">T</span></div>
+    <div class="name display">ORCIDA</div>
   </a>
+</nav>
+<div class="navstrip">
+  <a class="navbtn display" href="/#como" data-en="How it works">Como funciona</a>
+  <a class="navbtn display" href="/retro" data-en="📋 Form guide">📋 Retrospecto</a>
+  <a class="navbtn cta display" href="https://t.me/+B0SVEoGVrnxlYWFh"
+     data-en="Join the group">Entrar no grupo</a>
   <div class="lang" role="group" aria-label="Language">
     <button class="langbtn" data-lang="pt">PT</button>
     <button class="langbtn" data-lang="en">EN</button>
   </div>
-</nav>
+</div>
 
 <main>
   <div class="est display" data-en="★ Match archive · straight from the TxODDS feed ★">★ Arquivo de jogos · direto do feed TxODDS ★</div>

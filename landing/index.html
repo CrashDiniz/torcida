@@ -54,15 +54,18 @@
   nav .crest span { font-size: 33px; color: var(--paper); line-height: 1; }
   nav .name { font-size: 38px; letter-spacing: 6px; }
   .navstrip {
+    position: relative;
     display: flex; align-items: center; justify-content: center; gap: 10px;
-    flex-wrap: wrap; padding: 12px 10px;
+    flex-wrap: wrap; padding: 12px 96px;
     border-bottom: 1px solid #E0D6BF; background: rgba(38,34,26,.02);
   }
+  .navstrip .lang { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); }
   .navbtn {
     display: inline-block; background: var(--board); color: var(--paper);
     text-decoration: none; padding: 9px 16px 11px; border-radius: 6px;
     font-size: 12.5px; letter-spacing: 1.5px; position: relative;
     box-shadow: inset 0 -3px 0 rgba(0,0,0,.45); white-space: nowrap;
+    min-width: 176px; text-align: center;
   }
   .navbtn::after {
     content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
@@ -85,7 +88,9 @@
     nav .crest span { font-size: 25px; }
     nav .name { font-size: 28px; letter-spacing: 5px; }
     .navstrip { gap: 7px; padding: 10px 8px; }
+    .navstrip .lang { position: static; transform: none; }
     .navbtn, .langbtn { padding: 8px 11px 10px; font-size: 11.5px; }
+    .navbtn { min-width: 0; }
   }
 
   /* ---------- hero ---------- */
@@ -142,12 +147,18 @@
   }
   .flap.space { background: none; box-shadow: none; }
   .flap.space::after { display: none; }
+  .flap.edge { display: none; }  /* padding cells outside the text don't take
+                                    width, so the line (and its x) stays centered */
   .flap.flip { animation: flip .38s ease-in-out; }
   @keyframes flip { 0% {transform: rotateX(0);} 50% {transform: rotateX(90deg);} 100% {transform: rotateX(0);} }
   .board .foot {
-    margin-top: 14px; display: flex; justify-content: space-between; align-items: center;
-    font-family: 'Courier New', monospace; font-size: 12px; color: #6E6552; gap: 8px; flex-wrap: wrap;
+    margin-top: 14px; display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: center; gap: 8px;
+    font-family: 'Courier New', monospace; font-size: 12px; color: #6E6552;
   }
+  .board .foot #boardmeta { justify-self: start; }
+  .board .foot .live { justify-self: center; }  /* badge sits under the x */
+  .board .foot .grouplink { justify-self: end; }
   .board .live { color: var(--stamp); font-weight: bold; letter-spacing: 1px; }
   .board .live.on { animation: blink 1.2s infinite; }
   @keyframes blink { 50% { opacity: .3; } }
@@ -226,12 +237,12 @@
 <div class="navstrip">
   <a class="navbtn display" href="#como" data-en="How it works">Como funciona</a>
   <a class="navbtn display" href="/retro" data-en="📋 Form guide">📋 Retrospecto</a>
+  <a class="navbtn cta display" href="https://t.me/+B0SVEoGVrnxlYWFh"
+     data-en="Join the group">Entrar no grupo</a>
   <div class="lang" role="group" aria-label="Language">
     <button class="langbtn" data-lang="pt" type="button">PT</button>
     <button class="langbtn" data-lang="en" type="button">EN</button>
   </div>
-  <a class="navbtn cta display" href="https://t.me/+B0SVEoGVrnxlYWFh"
-     data-en="Join the group">Entrar no grupo</a>
 </div>
 
 <div class="hero">
@@ -403,13 +414,17 @@ function renderInitial() {
   boardEl.innerHTML = "";
   for (let i = 0; i < WIDTH; i++) {
     const d = document.createElement('div');
-    d.className = 'flap space'; d.textContent = ' ';
+    d.className = 'flap space edge'; d.textContent = ' ';
     boardEl.appendChild(d);
   }
 }
 function setLine(text) {
   const target = pad(text);
+  const first = target.search(/\S/);
+  let last = -1;
+  for (let i = 0; i < target.length; i++) if (target[i] !== ' ') last = i;
   [...boardEl.children].forEach((cell, i) => {
+    cell.classList.toggle('edge', first === -1 || i < first || i > last);
     if (target[i] === current[i]) return;
     setTimeout(() => {
       cell.classList.remove('space');
