@@ -669,8 +669,10 @@ function renderMine() {
           <span>${pool.pot ? r.chips + ' 🪙' : r.points + ' PTS'}</span></div>`).join('')}
     </div>
     ${pool.pot
-      ? `<div class="potline">💰 Prêmio: <b>${pool.pot} fichas</b> · ${esc(pool.payout_label)}</div>`
-      : `<div class="potline">Bolão grátis — joga por pontos e glória 🦓</div>`}
+      ? `<div class="potline">💰 Prêmio: <b>${pool.pot} fichas</b> · ${esc(pool.payout_label)}
+           <div style="font-size:11px;opacity:.75">fichas fictícias, sem dinheiro real —
+           pote valendo com escrow Solana tá no roadmap</div></div>`
+      : `<div class="potline">Bolão por pontos — valendo de verdade, sem dinheiro 🦓</div>`}
     <section>
       <h2>⚽ Palpitar · trocar</h2>
       ${pool.fixtures.map(f => `
@@ -747,6 +749,9 @@ function renderDiscover() {
       <h2>🏟 Bolões abertos</h2>
       ${discover.pools.length ? cards
         : '<p class="empty">Nenhum bolão aberto ainda — cria o primeiro! ⚽</p>'}
+      <p class="empty" style="font-size:11px;line-height:1.5">
+        <b>Modo pontos</b> funciona valendo agora. No <b>modo pote</b>, as 🪙 são
+        fichas fictícias (sem dinheiro real) — escrow on-chain na Solana tá no roadmap.</p>
     </section>`;
 }
 

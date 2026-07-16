@@ -429,7 +429,8 @@ async def choose_payout(callback: CallbackQuery) -> None:
     await callback.message.answer(
         f"Premiação definida: {PAYOUT_LABELS[preset]} ✅\n"
         f"Agora a <b>entrada</b> — fichas fictícias que cada um paga pro pote "
-        f"(divide pela premiação no fim). Sem dinheiro real:",
+        f"(divide pela premiação no fim). Sem dinheiro real — pote valendo, "
+        f"com escrow on-chain na Solana, tá no roadmap:",
         parse_mode="HTML", reply_markup=buyin_kb)
     await _answer(callback, "")
 
@@ -528,6 +529,47 @@ async def fixtures(message: Message) -> None:
                               message.from_user.first_name or "Você")
 
 
+def _record_opening(fixture_id: int, odds) -> None:
+    """Persist the first live full-time 1X2 line we see as the fixture's
+    opening odds — the baseline the narrator compares in-play moves against."""
+    if odds.live and not odds.period:
+        store.record_opening_odds(fixture_id, odds.home, odds.draw, odds.away,
+                                  time.time())
+
+
+async def _odds_move_note(fixture_id: int, label: str, h: int, a: int) -> str | None:
+    """'a odd da Argentina despencou de 4.0 pra 1.5 — e só o Pedro segurou':
+    compares the leading side's current price against the stored opening line.
+    Returns None whenever there's no story (draw, no baseline, small move)."""
+    if h == a or txline is None:
+        return None
+    opening = store.opening_odds(fixture_id)
+    if not opening:
+        return None
+    try:
+        snap = parse_snapshot(await txline.odds_snapshot(fixture_id))
+    except Exception:
+        log.warning("odds-move fetch failed for %s", fixture_id, exc_info=True)
+        return None
+    if not snap.live:
+        return None
+    sel = "1" if h > a else "2"
+    open_o, cur_o = opening[sel], snap.for_selection(sel)
+    if open_o / cur_o < 1.25:  # line barely moved: no story to tell
+        return None
+    home, away = (label.split(" x ", 1) if " x " in label else (label, ""))
+    team = home if sel == "1" else away
+    holders = [name for name, s, _ in store.named_picks_for_fixture(fixture_id)
+               if s == sel]
+    move = (f"E olha o mercado: a odd de {team} despencou de "
+            f"{open_o:.1f} pra {cur_o:.1f}")
+    if len(holders) == 1:
+        return f"{move} — e só {holders[0]} segurou essa desde o início!"
+    if holders:
+        return f"{move} — e {', '.join(holders[:3])} seguraram essa lá de trás!"
+    return f"{move} — e ninguém no bolão segurou essa!"
+
+
 async def _send_fixture_cards(message: Message, pool: Pool, user_id: int,
                               user_name: str) -> None:
     # cards live in the 🏆 topic when the group has one (keeps resenha clean)
@@ -546,6 +588,7 @@ async def _send_fixture_cards(message: Message, pool: Pool, user_id: int,
         home, away = pt(f.get("Participant1", "?")), pt(f.get("Participant2", "?"))
         fixture_label = f"{home} x {away}"
         store.set_fixture_label(f["FixtureId"], fixture_label)
+        _record_opening(f["FixtureId"], odds)
         if not odds.live:
             live_flag = " (odds de referência)"
         elif odds.period:
@@ -611,6 +654,7 @@ async def place_pick(callback: CallbackQuery) -> None:
     try:
         assert txline is not None
         snap = parse_snapshot(await txline.odds_snapshot(int(fixture_id)))
+        _record_opening(int(fixture_id), snap)
         odds = {"1": snap.home, "X": snap.draw, "2": snap.away}[selection]
     except Exception:
         log.warning("live odds fetch failed, using card odds", exc_info=True)
@@ -1131,10 +1175,11 @@ def _make_announcers(bot: Bot):
         happy, sad = [], []
         if h != a:
             leading = "1" if h > a else "2"
-            for name, sel in store.named_picks_for_fixture(state.fixture_id):
+            for name, sel, _ in store.named_picks_for_fixture(state.fixture_id):
                 (happy if sel == leading else sad).append(name)
+        odds_move = await _odds_move_note(state.fixture_id, label, h, a)
         ogg = await narrate("goal", label, h, a, happy=happy or None,
-                            sad=sad or None)
+                            sad=sad or None, odds_move=odds_move)
         if ogg:
             await _send_voice_note(bot, [c for _, c in chats], ogg)
 
@@ -1219,6 +1264,12 @@ async def _kickoff_alerts(bot: Bot) -> None:
                 delta = start_s - now
                 if fid not in alerted and 0 < delta <= KICKOFF_ALERT_S:
                     alerted.add(fid)
+                    try:  # last pre-match line = opening baseline fallback
+                        _record_opening(fid, parse_snapshot(
+                            await txline.odds_snapshot(fid)))
+                    except Exception:
+                        log.warning("opening-odds capture failed for %s", fid,
+                                    exc_info=True)
                     mins = max(1, round(delta / 60))
                     text = (f"🔔 <b>Faltam ~{mins} min pro apito!</b>\n"
                             f"⚽ <b>{html.escape(label)}</b> vai começar.\n\n"

@@ -246,3 +246,20 @@ def test_migration_adds_columns_to_legacy_db(tmp_path):
     fresh = store.create_pool(Pool(id="p2", name="Novo", creator_id=1,
                                    buy_in=50, visibility=Visibility.PUBLIC))
     assert store.pool_by_id(fresh.id).buy_in == 50
+
+
+def test_opening_odds_first_write_wins(tmp_path):
+    store = make_store(tmp_path)
+    assert store.opening_odds(900) is None
+    store.record_opening_odds(900, 4.0, 3.2, 1.8, ts=1000.0)
+    store.record_opening_odds(900, 1.5, 4.0, 6.0, ts=2000.0)  # in-play update
+    assert store.opening_odds(900) == {"1": 4.0, "X": 3.2, "2": 1.8}
+
+
+def test_named_picks_include_odds(tmp_path):
+    store = make_store(tmp_path)
+    pool = store.create_pool(make_pool())
+    store.join(pool.id, 42, "Pedro")
+    store.place_pick(Pick(id="", pool_id=pool.id, user_id=42, fixture_id=900,
+                          market="1x2", selection="2", odds_decimal=4.0))
+    assert store.named_picks_for_fixture(900) == [("Pedro", "2", 4.0)]

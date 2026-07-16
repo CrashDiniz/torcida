@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS chat_topics (
   thread_id INTEGER NOT NULL,
   PRIMARY KEY (chat_id, topic)
 );
+CREATE TABLE IF NOT EXISTS fixture_opening_odds (
+  fixture_id INTEGER PRIMARY KEY,
+  home REAL NOT NULL,
+  draw REAL NOT NULL,
+  away REAL NOT NULL,
+  recorded_at REAL NOT NULL
+);
 """
 
 
@@ -394,18 +401,40 @@ class Store:
             ).fetchall()
         return [self._pick(r) for r in rows]
 
-    def named_picks_for_fixture(self, fixture_id: int) -> list[tuple[str, str]]:
-        """[(display_name, selection)] of open picks on a fixture, for the
-        narrator to name who's happy/sad in the group."""
+    def named_picks_for_fixture(self, fixture_id: int) -> list[tuple[str, str, float]]:
+        """[(display_name, selection, odds_decimal)] of open picks on a fixture,
+        for the narrator to name who's happy/sad and who held a fading price."""
         with self._conn() as c:
             rows = c.execute(
-                """SELECT e.display_name AS name, p.selection AS selection
+                """SELECT e.display_name AS name, p.selection AS selection,
+                          p.odds_decimal AS odds
                    FROM picks p JOIN entries e
                      ON e.pool_id = p.pool_id AND e.user_id = p.user_id
                    WHERE p.fixture_id=? AND p.status='open'""",
                 (fixture_id,),
             ).fetchall()
-        return [(r["name"], r["selection"]) for r in rows]
+        return [(r["name"], r["selection"], r["odds"]) for r in rows]
+
+    def record_opening_odds(self, fixture_id: int, home: float, draw: float,
+                            away: float, ts: float) -> None:
+        """First live 1X2 snapshot we see for a fixture = its opening line
+        (INSERT OR IGNORE: later calls never overwrite)."""
+        with self._conn() as c:
+            c.execute(
+                """INSERT OR IGNORE INTO fixture_opening_odds
+                   (fixture_id, home, draw, away, recorded_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (fixture_id, home, draw, away, ts))
+
+    def opening_odds(self, fixture_id: int) -> dict[str, float] | None:
+        """{'1': home, 'X': draw, '2': away} opening line, or None."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT home, draw, away FROM fixture_opening_odds "
+                "WHERE fixture_id=?", (fixture_id,)).fetchone()
+        if row is None:
+            return None
+        return {"1": row["home"], "X": row["draw"], "2": row["away"]}
 
     def open_fixture_ids(self) -> list[int]:
         """Distinct fixtures that still have open picks (need settlement)."""

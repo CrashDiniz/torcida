@@ -138,8 +138,10 @@ async def _llm_spice(line: str) -> str:
             messages=[{"role": "system", "content":
                        "Você é um narrador de futebol brasileiro carismático, "
                        "estilo resenha de bar. Reescreva a frase pra soar NATURAL "
-                       "FALADA (vira áudio), mantendo os NOMES exatos e o resultado "
-                       "correto. Ao dizer o placar, use a forma falada do português "
+                       "FALADA (vira áudio), mantendo os NOMES exatos, o resultado "
+                       "correto e os números de odds quando houver (ex: 'de 4.0 pra "
+                       "1.5' — pode falar 'de quatro pra um e meio'). Ao dizer o "
+                       "placar, use a forma falada do português "
                        "— ex: '2 para a Argentina e 1 para a Inglaterra' ou 'a "
                        "Argentina marca o segundo' — NUNCA '2 a 1' seco nem 'x'. "
                        "Coloque tags de emoção entre colchetes no meio do texto (são "
@@ -220,16 +222,19 @@ async def narrate(kind: str, label: str, h: int, a: int,
                   leader: str = "", happy: list[str] | None = None,
                   sad: list[str] | None = None,
                   standings: list[tuple[str, int, int]] | None = None,
-                  pot: int = 0) -> Path | None:
+                  pot: int = 0, odds_move: str | None = None) -> Path | None:
     """Full pipeline; returns path to .ogg voice note or None on failure.
     happy/sad = members who picked the leading/trailing side (goal only).
-    standings = [(name, points, chips)] top-first + pot = full-time payout call."""
+    standings = [(name, points, chips)] top-first + pot = full-time payout call.
+    odds_move = ready-made line about the market ("odd despencou de 4.0 pra 1.5")."""
     if os.environ.get("TORCIDA_NARRATOR", "1") == "0":
         return None
     try:
         line = (goal_line(label, h, a, happy=happy, sad=sad) if kind == "goal"
                 else final_line(label, h, a, leader or "o líder",
                                 standings=standings, pot=pot))
+        if odds_move:
+            line = f"{line} {odds_move}"
         line = await _llm_spice(line)
         out = Path(tempfile.gettempdir()) / f"torcida_{kind}_{os.getpid()}_{random.randrange(1 << 30)}.ogg"
         return await synth_voice(line, out, kind=kind)
