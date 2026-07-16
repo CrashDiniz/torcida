@@ -33,7 +33,7 @@ from ..engine.scoring import points_for
 from ..engine.settlement import FixtureState, SettlementService
 from ..engine.store import Store
 from ..ingest.txline import TxLineClient
-from ..narrator.narrator import narrate
+from ..narrator.narrator import narrate, synth_voice
 
 log = logging.getLogger("bot")
 router = Router()
@@ -527,6 +527,38 @@ async def fixtures(message: Message) -> None:
         return
     await _send_fixture_cards(message, pool, message.from_user.id,
                               message.from_user.first_name or "Você")
+
+
+# keep refs to fire-and-forget narration tasks (GC would cancel them)
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _bg(task: asyncio.Task) -> None:
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+_goal_cry_lock = asyncio.Lock()
+
+
+async def _goal_cry():
+    """Pre-baked 'GOOOL!' voice note sent the instant a goal lands — the
+    elaborate AI narration follows seconds later. Synthesized once, cached in
+    data/ so restarts reuse it. Returns a Path or None."""
+    from pathlib import Path
+    out = Path("data") / "goal_cry.ogg"
+    if out.exists():
+        return out
+    async with _goal_cry_lock:
+        if out.exists():
+            return out
+        try:
+            await synth_voice("[shouting] GOOOOOOOOOL! GOL, GOL, GOL!",
+                              out, kind="goal")
+            return out
+        except Exception:
+            log.warning("goal cry synth failed", exc_info=True)
+            return None
 
 
 def _record_opening(fixture_id: int, odds) -> None:
@@ -1170,6 +1202,10 @@ def _make_announcers(bot: Bot):
                 f"{_score_between(label, state.home_goals or 0, state.away_goals or 0)}")
         for _, chat_id in chats:
             await _safe_send(bot, chat_id, text)
+        # instant reaction now; the elaborate AI call lands seconds later
+        cry = await _goal_cry()
+        if cry:
+            await _send_voice_note(bot, [c for _, c in chats], cry)
         # who in the group is happy/sad? name them in the narration
         h, a = state.home_goals or 0, state.away_goals or 0
         happy, sad = [], []
@@ -1177,11 +1213,15 @@ def _make_announcers(bot: Bot):
             leading = "1" if h > a else "2"
             for name, sel, _ in store.named_picks_for_fixture(state.fixture_id):
                 (happy if sel == leading else sad).append(name)
-        odds_move = await _odds_move_note(state.fixture_id, label, h, a)
-        ogg = await narrate("goal", label, h, a, happy=happy or None,
-                            sad=sad or None, odds_move=odds_move)
-        if ogg:
-            await _send_voice_note(bot, [c for _, c in chats], ogg)
+
+        async def _elaborate() -> None:
+            odds_move = await _odds_move_note(state.fixture_id, label, h, a)
+            ogg = await narrate("goal", label, h, a, happy=happy or None,
+                                sad=sad or None, odds_move=odds_move)
+            if ogg:
+                await _send_voice_note(bot, [c for _, c in chats], ogg)
+
+        _bg(asyncio.create_task(_elaborate()))
 
     async def on_final(state: FixtureState, settled: int) -> None:
         label = await _fixture_label(state.fixture_id)
