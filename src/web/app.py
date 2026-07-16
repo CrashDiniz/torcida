@@ -413,12 +413,14 @@ async def _live_payload() -> dict:
             "phase": BOARD_PHASE.get(phase_code, "em jogo"), "odds": odds,
         })
     nxt = None
+    nxt_at = None
     if not live:
         upcoming = [f for f in await _fixtures() if (f.get("StartTime") or 0) / 1000 > now]
         if upcoming:
             nf = min(upcoming, key=lambda f: f.get("StartTime") or 0)
             nxt = f"{pt(nf.get('Participant1', '?'))} x {pt(nf.get('Participant2', '?'))}"
-    payload = {"sports": SPORTS_TABS, "soccer": {"live": live, "next": nxt}}
+            nxt_at = nf.get("StartTime")  # ms epoch, board renders local kickoff time
+    payload = {"sports": SPORTS_TABS, "soccer": {"live": live, "next": nxt, "next_at": nxt_at}}
     _live_cache = (time.time(), payload)
     return payload
 

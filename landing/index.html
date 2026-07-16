@@ -406,6 +406,14 @@ function renderTabs() {
 }
 function stopCycle() { if (cycleTimer) { clearInterval(cycleTimer); cycleTimer = null; } }
 
+function fmtKickoff(ms) {                 // "sex., 18/07 · 16:00" in the visitor's tz
+  if (!ms) return '';
+  const d = new Date(ms), loc = LANG === 'en' ? 'en-US' : 'pt-BR';
+  const day = d.toLocaleDateString(loc, { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const time = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+  return `${day} · ${time}`;
+}
+
 function refreshBoard() {
   stopCycle();
   const sport = liveData && liveData.sports.find(s => s.id === activeSport);
@@ -428,13 +436,19 @@ function refreshBoard() {
     show();
     if (live.length > 1) cycleTimer = setInterval(show, 4200);
   } else {                                // no live game — show the next kickoff
-    liveEl.classList.remove('on'); liveEl.style.visibility = 'visible';
-    liveEl.textContent = LANG === 'en' ? '○ NEXT' : '○ PRÓXIMO';
+    liveEl.classList.remove('on');
     const nx = liveData.soccer && liveData.soccer.next;
-    setLine(nx ? nx.split(' x ').map(abbr).join(' x ')
-               : (LANG === 'en' ? 'NO GAMES' : 'SEM JOGOS'));
-    metaEl.textContent = nx ? (LANG === 'en' ? 'next match' : 'próximo jogo')
-                            : (LANG === 'en' ? 'no games today' : 'sem jogos hoje');
+    if (nx) {
+      liveEl.style.visibility = 'visible';
+      liveEl.textContent = LANG === 'en' ? '○ NEXT' : '○ PRÓXIMO';
+      setLine(nx.split(' x ').map(abbr).join(' x '));
+      metaEl.textContent = fmtKickoff(liveData.soccer.next_at)
+                        || (LANG === 'en' ? 'next match' : 'próximo jogo');
+    } else {                              // feed has nothing scheduled
+      liveEl.style.visibility = 'hidden';
+      setLine(LANG === 'en' ? 'SOON' : 'EM BREVE');
+      metaEl.textContent = LANG === 'en' ? 'new games soon' : 'novos jogos em breve';
+    }
   }
 }
 
