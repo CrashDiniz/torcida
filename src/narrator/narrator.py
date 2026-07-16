@@ -222,8 +222,10 @@ async def narrate(kind: str, label: str, h: int, a: int,
                   leader: str = "", happy: list[str] | None = None,
                   sad: list[str] | None = None,
                   standings: list[tuple[str, int, int]] | None = None,
-                  pot: int = 0, odds_move: str | None = None) -> Path | None:
-    """Full pipeline; returns path to .ogg voice note or None on failure.
+                  pot: int = 0,
+                  odds_move: str | None = None) -> tuple[Path, str] | None:
+    """Full pipeline; returns (path to .ogg voice note, spoken text) or None.
+    The text (audio tags stripped) doubles as the accessibility transcript.
     happy/sad = members who picked the leading/trailing side (goal only).
     standings = [(name, points, chips)] top-first + pot = full-time payout call.
     odds_move = ready-made line about the market ("odd despencou de 4.0 pra 1.5")."""
@@ -237,7 +239,7 @@ async def narrate(kind: str, label: str, h: int, a: int,
             line = f"{line} {odds_move}"
         line = await _llm_spice(line)
         out = Path(tempfile.gettempdir()) / f"torcida_{kind}_{os.getpid()}_{random.randrange(1 << 30)}.ogg"
-        return await synth_voice(line, out, kind=kind)
+        return await synth_voice(line, out, kind=kind), _strip_audio_tags(line)
     except Exception:
         log.warning("narration failed (%s %s)", kind, label, exc_info=True)
         return None

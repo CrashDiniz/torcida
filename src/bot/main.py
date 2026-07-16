@@ -1154,6 +1154,25 @@ async def my_pools(message: Message) -> None:
                          reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
+@router.message(Command("voz"))
+async def toggle_voice(message: Message) -> None:
+    """Creator toggles the narrator's voice notes for this pool (text always
+    stays — this is the anti-spam / spoiler control)."""
+    pool = _pool_for_chat(message.chat.id)
+    if pool is None:
+        await message.answer("Crie um bolão primeiro: /novo nome-do-bolão")
+        return
+    if message.from_user.id != pool.creator_id:
+        await message.answer("Só quem criou o bolão controla a voz 😉")
+        return
+    store.set_narrator(pool.id, not pool.narrator_on)
+    if pool.narrator_on:
+        await message.answer("🔇 Narrador mutado pra este bolão — os anúncios "
+                             "seguem em texto. /voz de novo pra religar.")
+    else:
+        await message.answer("🔊 Narrador LIGADO — bora que tem resenha!")
+
+
 @router.message(Command("placar"))
 async def leaderboard(message: Message) -> None:
     pool = _pool_for_chat(message.chat.id)
@@ -1201,16 +1220,29 @@ async def _safe_send(bot: Bot, chat_id: int, text: str, reply_markup=None) -> No
             log.warning("announce to chat %s failed", chat_id, exc_info=True)
 
 
-async def _send_voice_note(bot: Bot, chat_ids: list[int], ogg) -> None:
-    """Voice note to each chat's announcements topic; never raises."""
+async def _send_voice_note(bot: Bot, chat_ids: list[int], ogg,
+                           caption: str | None = None) -> None:
+    """Voice note to each chat's announcements topic; never raises.
+    caption = transcript of the audio (accessibility + muted-phone case)."""
     from aiogram.types import FSInputFile
     for chat_id in chat_ids:
         try:
             await bot.send_voice(
                 chat_id, FSInputFile(ogg),
+                caption=f"🎙 {caption[:1000]}" if caption else None,
                 message_thread_id=store.chat_topic(chat_id, "anuncios"))
         except Exception:
             log.warning("voice note to chat %s failed", chat_id, exc_info=True)
+
+
+def _voice_chats(chats: list[tuple[str, int]]) -> list[int]:
+    """Chats whose pool still wants voice notes (/voz toggle)."""
+    out = []
+    for pool_id, chat_id in chats:
+        pool = store.pool_by_id(pool_id)
+        if pool is None or pool.narrator_on:
+            out.append(chat_id)
+    return out
 
 
 def _score_between(label: str, h: int, a: int) -> str:
@@ -1232,9 +1264,10 @@ def _make_announcers(bot: Bot):
         for _, chat_id in chats:
             await _safe_send(bot, chat_id, text)
         # instant reaction now; the elaborate AI call lands seconds later
+        voice_chats = _voice_chats(chats)
         cry = await _goal_cry()
-        if cry:
-            await _send_voice_note(bot, [c for _, c in chats], cry)
+        if cry and voice_chats:
+            await _send_voice_note(bot, voice_chats, cry)
         # who in the group is happy/sad? name them in the narration
         h, a = state.home_goals or 0, state.away_goals or 0
         happy, sad = [], []
@@ -1244,11 +1277,14 @@ def _make_announcers(bot: Bot):
                 (happy if sel == leading else sad).append(name)
 
         async def _elaborate() -> None:
+            if not voice_chats:
+                return
             odds_move = await _odds_move_note(state.fixture_id, label, h, a)
-            ogg = await narrate("goal", label, h, a, happy=happy or None,
-                                sad=sad or None, odds_move=odds_move)
-            if ogg:
-                await _send_voice_note(bot, [c for _, c in chats], ogg)
+            result = await narrate("goal", label, h, a, happy=happy or None,
+                                   sad=sad or None, odds_move=odds_move)
+            if result:
+                ogg, transcript = result
+                await _send_voice_note(bot, voice_chats, ogg, caption=transcript)
 
         _bg(asyncio.create_task(_elaborate()))
 
@@ -1272,13 +1308,16 @@ def _make_announcers(bot: Bot):
                 f"🏁 <b>Fim de jogo!</b>\n{_score_between(label, home, away)}\n\n"
                 f"Palpites liquidados. 📊 <b>{html.escape(pool.name)}</b>:{pot_line}\n"
                 f"{board}")
-            ogg = await narrate(
+            if not pool.narrator_on:
+                continue
+            result = await narrate(
                 "final", label, home, away,
                 leader=split[0][1] if split else "",
                 standings=[(name, pts, chips) for _, name, pts, chips in split],
                 pot=store.pot_for(pool_id) if has_pot else 0)
-            if ogg:
-                await _send_voice_note(bot, [chat_id], ogg)
+            if result:
+                ogg, transcript = result
+                await _send_voice_note(bot, [chat_id], ogg, caption=transcript)
 
         async def _verify_and_announce() -> None:
             result = await _verify_onchain(state.fixture_id)

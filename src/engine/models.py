@@ -40,6 +40,7 @@ class Pool:
     payout_preset: PayoutPreset = PayoutPreset.TOP3
     language: str = "pt-BR"  # narrator persona
     narrator_delay_s: int = 0
+    narrator_on: bool = True  # /voz toggle: voice notes on/off for this pool
     buy_in: int = 0          # fictional chips each entry pays into the pot (0 = free)
     visibility: Visibility = Visibility.HIDDEN
     created_at: float = field(default_factory=time.time)

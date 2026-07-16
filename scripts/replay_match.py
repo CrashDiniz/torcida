@@ -77,10 +77,11 @@ async def main() -> None:
             await asyncio.sleep(args.pace)  # pace only matters for the camera
 
     async def on_goal(s):
-        ogg = await narrate("goal", DEMO_LABEL, s.home_goals or 0, s.away_goals or 0) \
-            if args.send else None
+        result = await narrate("goal", DEMO_LABEL, s.home_goals or 0,
+                               s.away_goals or 0) if args.send else None
         await post(f"⚽ <b>GOOOL!</b>\n{html.escape(DEMO_LABEL)}: "
-                   f"<b>{s.home_goals} x {s.away_goals}</b>", ogg)
+                   f"<b>{s.home_goals} x {s.away_goals}</b>",
+                   result[0] if result else None)
 
     async def on_phase(s, label):
         await post(f"{label}\n⚽ <b>{html.escape(DEMO_LABEL)}</b>")
@@ -91,13 +92,14 @@ async def main() -> None:
         board = "\n".join(f"{medals[i] if i < 3 else f'{i+1}.'} "
                           f"<b>{html.escape(nm)}</b> — {p} pts"
                           for i, (_, nm, p) in enumerate(rows))
-        ogg = await narrate("final", DEMO_LABEL, s.home_goals or 0,
-                            s.away_goals or 0, leader=rows[0][1] if rows else "") \
+        result = await narrate("final", DEMO_LABEL, s.home_goals or 0,
+                               s.away_goals or 0,
+                               leader=rows[0][1] if rows else "") \
             if args.send else None
         await post(f"🏁 <b>Fim de jogo!</b>\n{html.escape(DEMO_LABEL)}: "
                    f"<b>{s.home_goals} x {s.away_goals}</b>\n\n"
                    f"Palpites liquidados. 📊 <b>{html.escape(pool.name)}</b>:\n{board}",
-                   ogg)
+                   result[0] if result else None)
 
     svc = SettlementService(store=store, on_goal=on_goal, on_final=on_final,
                             on_phase=on_phase)

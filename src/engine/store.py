@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS pools (
   invite_code TEXT NOT NULL UNIQUE,
   telegram_chat_id INTEGER,
   buy_in INTEGER NOT NULL DEFAULT 0,
-  visibility TEXT NOT NULL DEFAULT 'hidden'
+  visibility TEXT NOT NULL DEFAULT 'hidden',
+  narrator_on INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS join_requests (
   pool_id TEXT NOT NULL REFERENCES pools(id),
@@ -120,6 +121,8 @@ class Store:
                    "buy_in")
         add_column("ALTER TABLE pools ADD COLUMN visibility TEXT NOT NULL "
                    "DEFAULT 'hidden'", "visibility")
+        add_column("ALTER TABLE pools ADD COLUMN narrator_on INTEGER NOT NULL "
+                   "DEFAULT 1", "narrator_on")
 
     @contextmanager
     def _conn(self):
@@ -259,7 +262,13 @@ class Store:
             language=row["language"], narrator_delay_s=row["narrator_delay_s"],
             buy_in=row["buy_in"], visibility=Visibility(row["visibility"]),
             created_at=row["created_at"], invite_code=row["invite_code"],
+            narrator_on=bool(row["narrator_on"]),
         )
+
+    def set_narrator(self, pool_id: str, on: bool) -> None:
+        with self._conn() as c:
+            c.execute("UPDATE pools SET narrator_on=? WHERE id=?",
+                      (int(on), pool_id))
 
     # --- entries -------------------------------------------------------------
 
