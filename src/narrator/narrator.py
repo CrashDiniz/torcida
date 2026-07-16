@@ -72,15 +72,15 @@ FINAL_TEMPLATES = [
 # goal lines that name a real group member — the hook no broadcaster has
 GOAL_NAMED_HAPPY = [
     "GOOOOOOL! {score_side} balançou a rede! {score}. "
-    "E o {name} tá PULANDO — cravou {score_side} e agora só falta a taça!",
+    "E {name} tá PULANDO — cravou {score_side} e agora só falta a taça!",
     "É GOL! {score_side} marca! {score}. "
-    "Anota aí: o {name} palpitou certinho e tá voando no bolão!",
+    "Anota aí: {name} palpitou certinho e tá voando no bolão!",
 ]
 GOAL_NAMED_SAD = [
     "GOOOL! {score_side} na frente! {score}. "
-    "E o {name}, coitado, apostou no outro — tá passando MAL no grupo agora!",
+    "E {name}, coitado, apostou no outro — tá passando MAL no grupo agora!",
     "É GOL! {score_side} não perdoou! {score}. "
-    "O {name} tá no chão — esse palpite foi pro brejo, haja coração!",
+    "{name} tá no chão — esse palpite foi pro brejo, haja coração!",
 ]
 
 

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Torcida — REPLAY TxLINE (demo pro júri)</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>">
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --txt:#e6edf3;
+          --dim:#8b949e; --green:#3fb950; --gold:#d29922; --red:#f85149; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--txt); min-height:100vh;
+         font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+         display:flex; flex-direction:column; align-items:center; padding:24px 16px; }
+  .badge { display:inline-flex; align-items:center; gap:8px; font-weight:800;
+           background:#3d1d1d; color:#ff7b72; border:1px solid #f8514966;
+           padding:6px 14px; border-radius:999px; font-size:13px; letter-spacing:1px; }
+  .badge .dot { width:9px; height:9px; border-radius:50%; background:var(--red);
+                animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.3 } }
+  h1 { font-size:22px; margin:14px 0 4px; text-align:center; }
+  .sub { color:var(--dim); font-size:13px; text-align:center; max-width:560px; }
+  .sub a { color:#58a6ff; }
+  .stage { width:100%; max-width:620px; margin-top:18px; display:flex;
+           flex-direction:column; gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line);
+          border-radius:12px; padding:16px; }
+  .score { display:flex; justify-content:space-between; align-items:center; }
+  .team { font-size:17px; font-weight:700; width:38%; }
+  .team.right { text-align:right; }
+  .num { font-size:44px; font-weight:900; font-variant-numeric:tabular-nums; }
+  .phase { text-align:center; color:var(--gold); font-size:13px; min-height:18px;
+           margin-top:6px; }
+  .narr { min-height:64px; display:flex; gap:10px; align-items:flex-start; }
+  .narr .mic { font-size:22px; }
+  .narr p { font-size:14px; line-height:1.5; color:var(--txt); }
+  .narr .label { font-size:11px; color:var(--dim); letter-spacing:1px;
+                 text-transform:uppercase; margin-bottom:3px; }
+  canvas { width:100%; height:120px; }
+  .legend { display:flex; gap:14px; font-size:11px; color:var(--dim); margin-top:6px; }
+  .legend b { font-weight:700; }
+  .picks { display:flex; gap:8px; flex-wrap:wrap; }
+  .pick { border:1px solid var(--line); border-radius:999px; padding:5px 12px;
+          font-size:12.5px; color:var(--dim); transition:all .4s; }
+  .pick.win { border-color:var(--green); color:var(--green); font-weight:700; }
+  .pick.lose { opacity:.45; }
+  .board .row { display:flex; justify-content:space-between; padding:6px 2px;
+                font-size:14px; border-bottom:1px dashed var(--line); }
+  .board .row:last-child { border-bottom:none; }
+  .btn { cursor:pointer; border:none; border-radius:10px; padding:14px 22px;
+         font-size:16px; font-weight:800; background:var(--green); color:#04120a;
+         width:100%; }
+  .btn[disabled] { opacity:.5; cursor:default; }
+  .proof { font-size:12.5px; color:var(--dim); line-height:1.7; }
+  .proof a { color:#58a6ff; word-break:break-all; }
+  footer { margin:26px 0 8px; text-align:center; font-size:13px; color:var(--dim); }
+  footer a { color:#58a6ff; font-weight:700; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+  <span class="badge"><span class="dot"></span> REPLAY TxLINE — DADOS REAIS GRAVADOS</span>
+  <h1 id="title">França × Espanha — semifinal</h1>
+  <p class="sub">Replay fiel da semifinal, reproduzido pelo <b>mesmo pipeline</b> que roda ao vivo:
+     feed SSE da TxLINE → engine de settlement → narrador AI (DeepSeek + ElevenLabs).
+     Nada aqui é roteirizado — os eventos, odds e áudios vêm da gravação do feed real (devnet).</p>
+
+  <div class="stage">
+    <div class="card">
+      <div class="score">
+        <div class="team" id="home">França</div>
+        <div class="num"><span id="h">0</span>&nbsp;×&nbsp;<span id="a">0</span></div>
+        <div class="team right" id="away">Espanha</div>
+      </div>
+      <div class="phase" id="phase">aguardando bola rolar…</div>
+    </div>
+
+    <div class="card narr">
+      <div class="mic">🎙️</div>
+      <div style="flex:1">
+        <div class="label">Narrador AI — voz + transcrição (acessibilidade)</div>
+        <p id="text">Aperta o play que a resenha começa.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label" style="font-size:11px;color:var(--dim);letter-spacing:1px;
+           text-transform:uppercase;margin-bottom:6px">
+        Odds 1X2 ao vivo (StablePrice · /api/odds/stream)</div>
+      <canvas id="chart" width="580" height="120"></canvas>
+      <div class="legend">
+        <span style="color:#58a6ff"><b>■</b> França</span>
+        <span style="color:#8b949e"><b>■</b> Empate</span>
+        <span style="color:#f0883e"><b>■</b> Espanha</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label" style="font-size:11px;color:var(--dim);letter-spacing:1px;
+           text-transform:uppercase;margin-bottom:8px">
+        Palpites do grupo (odd congelada no toque · pontos = 100 × odd)</div>
+      <div class="picks" id="picks"></div>
+    </div>
+
+    <div class="card board hidden" id="board">
+      <div class="label" style="font-size:11px;color:var(--dim);letter-spacing:1px;
+           text-transform:uppercase;margin-bottom:6px">🏁 Settlement automático — classificação</div>
+      <div id="rows"></div>
+    </div>
+
+    <button class="btn" id="play">▶ Dar o play na resenha (com som)</button>
+
+    <div class="card proof">
+      <b style="color:var(--txt)">🔐 Prova on-chain (Solana devnet)</b><br>
+      Resultado final (0×2) verificado contra a Merkle root da TxLINE via
+      <code>validateStatV2</code>, sem árbitro humano:<br>
+      <a target="_blank" rel="noopener"
+         href="https://explorer.solana.com/tx/44Ye9Vxs972wtgUex4dLoyijLZgWJdf8NnrHn5mEE3iBXCGJF1gtDBiffGFqBB79pxYhKd6JUtoaLxzkMJb3AW9Z?cluster=devnet">
+         tx 44Ye9Vxs…MJb3AW9Z ↗</a><br>
+      Assinatura TxLINE (Subscribe, acesso 100% via wallet):
+      <a target="_blank" rel="noopener"
+         href="https://explorer.solana.com/tx/4NVWMuouHN42RbfwswrnEgPGDAZP2e4R7BRLnYZdhLHLqerVu4cgFKpHi9wP3fZf93WZ3GmBFRykEuHL4cTe1beD?cluster=devnet">
+         tx 4NVWMuou…4cTe1beD ↗</a>
+    </div>
+  </div>
+
+  <footer>
+    Curtiu? A versão ao vivo roda dentro do grupo:
+    <a href="https://t.me/torcidaapp_bot/app">t.me/torcidaapp_bot/app</a> ·
+    <a href="/">landing</a>
+  </footer>
+
+<script>
+(async () => {
+  const demo = await (await fetch('/demo/demo.json')).json();
+  const $ = id => document.getElementById(id);
+  const beats = demo.timeline, odds = demo.odds;
+  const sel2team = {'1':'França','X':'Empate','2':'Espanha'};
+
+  // group picks
+  const renderPicks = (leading) => {
+    $('picks').innerHTML = demo.players.map(p => {
+      const cls = !leading ? '' : (p.selection === leading ? 'win' : 'lose');
+      return `<span class="pick ${cls}">${p.name} · ${sel2team[p.selection]}
+              @ ${p.odds.toFixed(2)} · vale ${Math.round(p.odds*100)} pts</span>`;
+    }).join('');
+  };
+  renderPicks(null);
+
+  // odds chart drawn up to a time limit
+  const ctx = $('chart').getContext('2d');
+  const W = 580, H = 120, PAD = 6;
+  // clamp the y-scale: a losing side's odds balloon (20+) and would squash
+  // the readable 1-8 band where the whole story happens
+  const O_CAP = 8;
+  const tMax = demo.duration,
+        oMax = Math.min(O_CAP, Math.max(...odds.flatMap(o => o.slice(1))));
+  const colors = ['#58a6ff', '#8b949e', '#f0883e'];
+  function draw(tLimit) {
+    ctx.clearRect(0, 0, W, H);
+    for (let s = 0; s < 3; s++) {
+      ctx.beginPath(); ctx.strokeStyle = colors[s]; ctx.lineWidth = 2;
+      let started = false;
+      for (const row of odds) {
+        if (row[0] > tLimit) break;
+        const x = PAD + (row[0] / tMax) * (W - 2*PAD);
+        const v = Math.min(O_CAP, row[s+1]);
+        const y = H - PAD - ((v - 1) / (oMax - 1)) * (H - 2*PAD);
+        started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true;
+      }
+      ctx.stroke();
+    }
+  }
+  draw(0);
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function animateChart(from, to, ms) {
+    const t0 = performance.now();
+    while (performance.now() - t0 < ms) {
+      draw(from + (to - from) * (performance.now() - t0) / ms);
+      await sleep(40);
+    }
+    draw(to);
+  }
+
+  function playAudio(src) {
+    return new Promise(res => {
+      const au = new Audio('/demo/audio/' + src);
+      au.onended = res; au.onerror = res;
+      au.play().catch(res);
+    });
+  }
+
+  let running = false;
+  async function run() {
+    if (running) return; running = true;
+    $('play').disabled = true; $('play').textContent = '📺 AO VIVO (replay)…';
+    $('board').classList.add('hidden');
+    $('h').textContent = 0; $('a').textContent = 0;
+    renderPicks(null);
+    let prevT = 0;
+    for (const beat of beats) {
+      await animateChart(prevT, beat.at, beat.kind === 'phase' ? 1600 : 2600);
+      prevT = beat.at;
+      const [h, a] = beat.score;
+      $('h').textContent = h; $('a').textContent = a;
+      if (beat.kind === 'phase') {
+        $('phase').textContent = beat.text;
+        await sleep(2200);
+        continue;
+      }
+      $('phase').textContent = beat.kind === 'final' ? '🏁 Fim de jogo' : '⚽ GOL!';
+      $('text').textContent = beat.text;
+      renderPicks(h === a ? 'X' : (h > a ? '1' : '2'));
+      if (beat.kind === 'final' && beat.standings) {
+        $('board').classList.remove('hidden');
+        $('rows').innerHTML = beat.standings.map((r, i) =>
+          `<div class="row"><span>${['🥇','🥈','🥉'][i] ?? (i+1)+'.'} ${r[0]}</span>
+           <b>${r[1]} pts</b></div>`).join('');
+      }
+      if (beat.audio) await playAudio(beat.audio); else await sleep(6000);
+      await sleep(1200);
+    }
+    $('play').disabled = false;
+    $('play').textContent = '🔁 Rever o replay';
+    running = false;
+  }
+  $('play').onclick = run;
+})();
+</script>
+</body>
+</html>

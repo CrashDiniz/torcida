@@ -880,3 +880,32 @@ async def landing() -> str:
     from pathlib import Path
     page = Path(__file__).resolve().parents[2] / "landing" / "index.html"
     return page.read_text(encoding="utf-8")
+
+
+# --- judge-facing replay demo (no live match needed) --------------------------
+
+@app.get("/demo", response_class=HTMLResponse)
+async def demo_page() -> str:
+    """REPLAY TxLINE: the recorded semifinal through the real pipeline."""
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[2] / "landing" / "demo.html"
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/demo/demo.json")
+async def demo_data():
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    return FileResponse(Path("data/demo/demo.json"), media_type="application/json")
+
+
+@app.get("/demo/audio/{name}")
+async def demo_audio(name: str):
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    if not name.replace(".", "").replace("_", "").isalnum() or ".." in name:
+        return {"error": "nope"}
+    path = Path("data/demo/audio") / name
+    if not path.exists():
+        return {"error": "not found"}
+    return FileResponse(path, media_type="audio/mpeg")
