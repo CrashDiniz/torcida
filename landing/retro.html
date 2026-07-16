@@ -55,7 +55,7 @@
     text-decoration: none; padding: 9px 16px 11px; border-radius: 6px;
     font-size: 12.5px; letter-spacing: 1.5px; position: relative;
     box-shadow: inset 0 -3px 0 rgba(0,0,0,.45); white-space: nowrap;
-    min-width: 176px; text-align: center;
+    width: 205px; text-align: center;
   }
   .navbtn::after {
     content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
@@ -80,7 +80,7 @@
     .navstrip { gap: 7px; padding: 10px 8px; }
     .navstrip .lang { position: static; transform: none; }
     .navbtn, .langbtn { padding: 8px 11px 10px; font-size: 11.5px; }
-    .navbtn { min-width: 0; }
+    .navbtn { width: auto; }
   }
 
   main { max-width: 760px; margin: 0 auto; padding: 40px 16px 30px; }
@@ -190,6 +190,19 @@ let LANG = (function () {
 })();
 const T = (pt, en) => LANG === 'en' ? en : pt;
 
+/* the feed speaks PT team names; EN page translates the ones in play */
+const TEAM_EN = {
+  'França': 'France', 'Espanha': 'Spain', 'Inglaterra': 'England',
+  'Argentina': 'Argentina', 'Suíça': 'Switzerland', 'Brasil': 'Brazil',
+  'Alemanha': 'Germany', 'Holanda': 'Netherlands', 'Países Baixos': 'Netherlands',
+  'Portugal': 'Portugal', 'México': 'Mexico', 'Estados Unidos': 'United States',
+  'Canadá': 'Canada', 'Japão': 'Japan', 'Marrocos': 'Morocco',
+  'Croácia': 'Croatia', 'Bélgica': 'Belgium', 'Uruguai': 'Uruguay',
+  'Colômbia': 'Colombia', 'Itália': 'Italy', 'Escócia': 'Scotland',
+  'Noruega': 'Norway', 'Senegal': 'Senegal', 'Egito': 'Egypt',
+};
+const team = n => (LANG === 'en' && TEAM_EN[n]) || n;
+
 function applyLang(lang) {
   LANG = (lang === 'en') ? 'en' : 'pt';
   document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
@@ -209,9 +222,13 @@ document.querySelectorAll('.langbtn').forEach(function (b) {
 
 function fmtWhen(ms) {
   if (!ms) return '';
-  const d = new Date(ms), loc = LANG === 'en' ? 'en-US' : 'pt-BR';
-  return d.toLocaleDateString(loc, { weekday: 'short', day: '2-digit', month: '2-digit' })
-       + ' · ' + d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+  const d = new Date(ms), en = LANG === 'en';
+  const tz = en ? { timeZone: 'America/New_York' } : {};  // EN shows US Eastern
+  return d.toLocaleDateString(en ? 'en-US' : 'pt-BR',
+           { weekday: 'short', day: '2-digit', month: '2-digit', ...tz })
+       + ' · ' + d.toLocaleTimeString(en ? 'en-US' : 'pt-BR',
+           { hour: '2-digit', minute: '2-digit', ...tz })
+       + (en ? ' ET' : '');
 }
 
 function statRow(label, hv, av) {
@@ -227,9 +244,9 @@ function playedCard(g) {
   if (g.h.reds || g.a.reds) rows.push(statRow(T('vermelhos', 'red cards'), g.h.reds, g.a.reds));
   return `<div class="card">
     <div class="matchline display">
-      <span class="team">${g.home}</span>
+      <span class="team">${team(g.home)}</span>
       <span class="score">${g.h.goals} × ${g.a.goals}</span>
-      <span class="team">${g.away}</span>
+      <span class="team">${team(g.away)}</span>
     </div>
     <div class="when">${fmtWhen(g.start)} · ${T('encerrado', 'full-time')}</div>
     <table class="stats">${rows.join('')}</table>
@@ -245,13 +262,13 @@ function oddBox(k, v) {
 function nextCard(g) {
   const o = g.odds;
   const odds = o ? `<div class="oddsrow">
-      ${oddBox(g.home, o.home)}${oddBox(T('empate', 'draw'), o.draw)}${oddBox(g.away, o.away)}
+      ${oddBox(team(g.home), o.home)}${oddBox(T('empate', 'draw'), o.draw)}${oddBox(team(g.away), o.away)}
     </div>` : `<div class="when">${T('odds em breve no feed', 'odds soon on the feed')}</div>`;
   return `<div class="card">
     <div class="matchline display">
-      <span class="team">${g.home}</span>
+      <span class="team">${team(g.home)}</span>
       <span class="score">×</span>
-      <span class="team">${g.away}</span>
+      <span class="team">${team(g.away)}</span>
     </div>
     <div class="when">${fmtWhen(g.start)}</div>
     ${odds}

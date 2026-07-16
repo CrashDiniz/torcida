@@ -65,7 +65,7 @@
     text-decoration: none; padding: 9px 16px 11px; border-radius: 6px;
     font-size: 12.5px; letter-spacing: 1.5px; position: relative;
     box-shadow: inset 0 -3px 0 rgba(0,0,0,.45); white-space: nowrap;
-    min-width: 176px; text-align: center;
+    width: 205px; text-align: center;
   }
   .navbtn::after {
     content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
@@ -90,7 +90,7 @@
     .navstrip { gap: 7px; padding: 10px 8px; }
     .navstrip .lang { position: static; transform: none; }
     .navbtn, .langbtn { padding: 8px 11px 10px; font-size: 11.5px; }
-    .navbtn { min-width: 0; }
+    .navbtn { width: auto; }
   }
 
   /* ---------- hero ---------- */
@@ -437,7 +437,24 @@ function setLine(text) {
   current = target;
 }
 
-const abbr = s => String(s || '?').slice(0, 3).toUpperCase();
+/* FIFA-style codes where the naive 3-letter slice gets it wrong */
+const FIFA = { 'Spain': 'ESP', 'England': 'ENG', 'Switzerland': 'SUI',
+               'Germany': 'GER', 'Netherlands': 'NED', 'United States': 'USA',
+               'Japan': 'JPN', 'Morocco': 'MAR', 'Croatia': 'CRO',
+               'Uruguay': 'URU', 'Suíça': 'SUI', 'Japão': 'JAP' };
+const abbr = s => FIFA[s] || String(s || '?').slice(0, 3).toUpperCase();
+/* the feed speaks PT team names; the EN board translates before abbreviating */
+const TEAM_EN = {
+  'França': 'France', 'Espanha': 'Spain', 'Inglaterra': 'England',
+  'Argentina': 'Argentina', 'Suíça': 'Switzerland', 'Brasil': 'Brazil',
+  'Alemanha': 'Germany', 'Holanda': 'Netherlands', 'Países Baixos': 'Netherlands',
+  'Portugal': 'Portugal', 'México': 'Mexico', 'Estados Unidos': 'United States',
+  'Canadá': 'Canada', 'Japão': 'Japan', 'Marrocos': 'Morocco',
+  'Croácia': 'Croatia', 'Bélgica': 'Belgium', 'Uruguai': 'Uruguay',
+  'Colômbia': 'Colombia', 'Itália': 'Italy', 'Escócia': 'Scotland',
+  'Noruega': 'Norway', 'Senegal': 'Senegal', 'Egito': 'Egypt',
+};
+const team = n => (LANG === 'en' && TEAM_EN[n]) || n;
 let liveData = null, activeSport = 'soccer', cycleTimer = null, cycleIdx = 0;
 
 const TAB_LABELS = {
@@ -457,12 +474,15 @@ function renderTabs() {
 }
 function stopCycle() { if (cycleTimer) { clearInterval(cycleTimer); cycleTimer = null; } }
 
-function fmtKickoff(ms) {                 // "sex., 18/07 · 16:00" in the visitor's tz
+function fmtKickoff(ms) {   // PT: visitor's tz · EN: US Eastern (host country)
   if (!ms) return '';
-  const d = new Date(ms), loc = LANG === 'en' ? 'en-US' : 'pt-BR';
-  const day = d.toLocaleDateString(loc, { weekday: 'short', day: '2-digit', month: '2-digit' });
-  const time = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
-  return `${day} · ${time}`;
+  const d = new Date(ms), en = LANG === 'en';
+  const tz = en ? { timeZone: 'America/New_York' } : {};
+  const day = d.toLocaleDateString(en ? 'en-US' : 'pt-BR',
+                { weekday: 'short', day: '2-digit', month: '2-digit', ...tz });
+  const time = d.toLocaleTimeString(en ? 'en-US' : 'pt-BR',
+                 { hour: '2-digit', minute: '2-digit', ...tz });
+  return `${day} · ${time}${en ? ' ET' : ''}`;
 }
 
 function refreshBoard() {
@@ -485,7 +505,7 @@ function refreshBoard() {
     cycleIdx = 0;
     const show = () => {
       const g = live[cycleIdx % live.length]; cycleIdx++;
-      setLine(`${abbr(g.home)} ${g.hs} x ${g.as} ${abbr(g.away)}`);
+      setLine(`${abbr(team(g.home))} ${g.hs} x ${g.as} ${abbr(team(g.away))}`);
       metaEl.textContent = g.phase;
     };
     show();
@@ -503,7 +523,7 @@ function refreshBoard() {
         liveEl.textContent = g.final
           ? (LANG === 'en' ? '★ GRAND FINAL' : '★ GRANDE FINAL')
           : (LANG === 'en' ? '○ NEXT' : '○ PRÓXIMO');
-        setLine(g.label.split(' x ').map(abbr).join(' x '));
+        setLine(g.label.split(' x ').map(n => abbr(team(n))).join(' x '));
         metaEl.textContent = fmtKickoff(g.at)
                           || (LANG === 'en' ? 'next match' : 'próximo jogo');
       };
