@@ -25,12 +25,17 @@ const { PublicKey, Keypair, Connection, ComputeBudgetProgram } = require("@solan
 const BN = require("bn.js");
 const axios = require("axios");
 
-const IDL = require("./txoracle.devnet.json");
-
 function arg(name) {
   const i = process.argv.indexOf(name);
   return i === -1 ? null : (process.argv[i + 1] ?? true);
 }
+
+// --network mainnet: mainnet IDL/API/RPC (env can still override each piece)
+const MAINNET = process.argv.includes("--network")
+  ? process.argv[process.argv.indexOf("--network") + 1] === "mainnet"
+  : false;
+const IDL = MAINNET ? require("./txoracle.mainnet.json")
+                    : require("./txoracle.devnet.json");
 
 function toBytes32(value) {
   const bytes = Array.isArray(value) ? Uint8Array.from(value)
@@ -51,7 +56,9 @@ async function main() {
   if (!fixtureId) throw new Error("--fixture <id> is required");
   const send = process.argv.includes("--send");
 
-  const apiBase = (process.env.TXLINE_API_BASE || "https://txline-dev.txodds.com").replace(/\/$/, "");
+  const apiBase = (process.env.TXLINE_API_BASE
+    || (MAINNET ? "https://txline.txodds.com" : "https://txline-dev.txodds.com"))
+    .replace(/\/$/, "");
   const apiToken = process.env.TXLINE_API_TOKEN;
   if (!apiToken) throw new Error("TXLINE_API_TOKEN not set");
 
@@ -117,11 +124,14 @@ async function main() {
 
   // --- anchor: devnet program + daily_scores_roots PDA ---------------------
   const walletPath = process.env.WALLET_PATH
-    || path.join(__dirname, "..", "..", ".keys", "devnet-wallet.json");
+    || path.join(__dirname, "..", "..", ".keys",
+                 MAINNET ? "mainnet-wallet.json" : "devnet-wallet.json");
   const keypair = Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(fs.readFileSync(walletPath, "utf8"))));
   const connection = new Connection(
-    process.env.SOLANA_RPC || "https://api.devnet.solana.com", "confirmed");
+    process.env.SOLANA_RPC
+      || (MAINNET ? "https://api.mainnet-beta.solana.com"
+                  : "https://api.devnet.solana.com"), "confirmed");
   const provider = new anchor.AnchorProvider(
     connection, new anchor.Wallet(keypair), anchor.AnchorProvider.defaultOptions());
   const program = new anchor.Program(IDL, provider);
@@ -152,7 +162,7 @@ async function main() {
   console.log(JSON.stringify({
     valid, fixtureId, seq, home, away, txSig,
     explorer: txSig
-      ? `https://explorer.solana.com/tx/${txSig}?cluster=devnet`
+      ? `https://explorer.solana.com/tx/${txSig}${MAINNET ? "" : "?cluster=devnet"}`
       : null,
     program: program.programId.toBase58(),
   }));
