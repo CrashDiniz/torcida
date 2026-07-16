@@ -5,157 +5,252 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Torcida — REPLAY TxLINE (demo pro júri)</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Graduate&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --txt:#e6edf3;
-          --dim:#8b949e; --green:#3fb950; --gold:#d29922; --red:#f85149; }
-  * { box-sizing:border-box; margin:0; padding:0; }
-  body { background:var(--bg); color:var(--txt); min-height:100vh;
-         font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
-         display:flex; flex-direction:column; align-items:center; padding:24px 16px; }
-  .badge { display:inline-flex; align-items:center; gap:8px; font-weight:800;
-           background:#3d1d1d; color:#ff7b72; border:1px solid #f8514966;
-           padding:6px 14px; border-radius:999px; font-size:13px; letter-spacing:1px; }
-  .badge .dot { width:9px; height:9px; border-radius:50%; background:var(--red);
-                animation:pulse 1.2s infinite; }
-  @keyframes pulse { 50% { opacity:.3 } }
-  h1 { font-size:22px; margin:14px 0 4px; text-align:center; }
-  .sub { color:var(--dim); font-size:13px; text-align:center; max-width:560px; }
-  .sub a { color:#58a6ff; }
-  .stage { width:100%; max-width:620px; margin-top:18px; display:flex;
-           flex-direction:column; gap:12px; }
-  .card { background:var(--card); border:1px solid var(--line);
-          border-radius:12px; padding:16px; }
-  .score { display:flex; justify-content:space-between; align-items:center; }
-  .team { font-size:17px; font-weight:700; width:38%; }
-  .team.right { text-align:right; }
-  .num { font-size:44px; font-weight:900; font-variant-numeric:tabular-nums; }
-  .phase { text-align:center; color:var(--gold); font-size:13px; min-height:18px;
-           margin-top:6px; }
-  .narr { min-height:64px; display:flex; gap:10px; align-items:flex-start; }
-  .narr .mic { font-size:22px; }
-  .narr p { font-size:14px; line-height:1.5; color:var(--txt); }
-  .narr .label { font-size:11px; color:var(--dim); letter-spacing:1px;
-                 text-transform:uppercase; margin-bottom:3px; }
-  canvas { width:100%; height:120px; }
-  .legend { display:flex; gap:14px; font-size:11px; color:var(--dim); margin-top:6px; }
-  .legend b { font-weight:700; }
-  .picks { display:flex; gap:8px; flex-wrap:wrap; }
-  .pick { border:1px solid var(--line); border-radius:999px; padding:5px 12px;
-          font-size:12.5px; color:var(--dim); transition:all .4s; }
-  .pick.win { border-color:var(--green); color:var(--green); font-weight:700; }
-  .pick.lose { opacity:.45; }
-  .board .row { display:flex; justify-content:space-between; padding:6px 2px;
-                font-size:14px; border-bottom:1px dashed var(--line); }
-  .board .row:last-child { border-bottom:none; }
-  .btn { cursor:pointer; border:none; border-radius:10px; padding:14px 22px;
-         font-size:16px; font-weight:800; background:var(--green); color:#04120a;
-         width:100%; }
-  .btn[disabled] { opacity:.5; cursor:default; }
-  .proof { font-size:12.5px; color:var(--dim); line-height:1.7; }
-  .proof a { color:#58a6ff; word-break:break-all; }
-  footer { margin:26px 0 8px; text-align:center; font-size:13px; color:var(--dim); }
-  footer a { color:#58a6ff; font-weight:700; }
-  .hidden { display:none; }
+  :root {
+    --paper: #F1E9D8; --ink: #26221A; --green: #1B4D3E; --green-dk: #143C30;
+    --stamp: #C8102E; --gold: #D9A441; --board: #14120E; --dim: #6E6552;
+    --card: #FBF6EA;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink); min-height: 100vh;
+    font-family: 'Crimson Pro', Georgia, serif; font-size: 17px;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 22px 14px 30px;
+    background-image: radial-gradient(rgba(38,34,26,.05) 1px, transparent 1px);
+    background-size: 5px 5px;
+  }
+  .display { font-family: 'Graduate', Georgia, serif; }
+  .topline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px; font-weight: 700;
+    background: rgba(200,16,46,.08); color: var(--stamp);
+    border: 1.5px dashed var(--stamp); transform: rotate(-.6deg);
+    padding: 6px 14px; border-radius: 6px; font-size: 12.5px; letter-spacing: 1px;
+    font-family: 'Graduate', serif;
+  }
+  .badge .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--stamp);
+                animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .3 } }
+  .lang { display: flex; gap: 3px; }
+  .langbtn {
+    background: transparent; color: var(--green); border: 1px solid var(--gold);
+    padding: 4px 9px; font-size: 12px; letter-spacing: 1px; cursor: pointer;
+    border-radius: 3px; font-family: 'Graduate', serif; opacity: .55; line-height: 1;
+  }
+  .langbtn.on { background: var(--gold); color: var(--green-dk); opacity: 1; }
+  h1 { font-size: 24px; margin: 14px 0 4px; text-align: center; letter-spacing: 1px; }
+  .sub { color: var(--dim); font-size: 14px; text-align: center; max-width: 580px; }
+  .sub b { color: var(--ink); }
+  .stage { width: 100%; max-width: 620px; margin-top: 18px; display: flex;
+           flex-direction: column; gap: 12px; }
+  .card { background: var(--card); border: 2px solid var(--gold);
+          border-radius: 10px; padding: 16px; box-shadow: 0 4px 0 rgba(38,34,26,.14); }
+  .label { font-size: 11px; color: var(--dim); letter-spacing: 2px;
+           text-transform: uppercase; margin-bottom: 8px;
+           font-family: 'Courier New', monospace; }
+
+  /* score as split-flap tiles */
+  .score { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .team { font-size: 17px; width: 34%; font-family: 'Graduate', serif; letter-spacing: 1px; }
+  .team.right { text-align: right; }
+  .nums { display: flex; align-items: center; gap: 7px; }
+  .flap {
+    width: 44px; height: 58px; background: var(--board); color: var(--paper);
+    display: grid; place-items: center; font-family: 'Courier New', monospace;
+    font-size: 34px; font-weight: bold; border-radius: 6px; position: relative;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,.35);
+  }
+  .flap::after { content: ""; position: absolute; left: 0; right: 0; top: 50%;
+                 height: 1px; background: rgba(241,233,216,.28); }
+  .flap.flip { animation: flip .38s ease-in-out; }
+  @keyframes flip { 50% { transform: rotateX(90deg); } }
+  .x { color: var(--dim); font-size: 20px; font-family: 'Graduate', serif; }
+  .phase { text-align: center; color: var(--stamp); font-size: 14px; min-height: 26px;
+           margin-top: 10px; font-family: 'Courier New', monospace; letter-spacing: 1px; }
+  .phase.shout { font-size: 22px; font-family: 'Graduate', serif; color: var(--stamp);
+                 animation: shout .5s ease-in-out 3; }
+  @keyframes shout { 50% { transform: scale(1.18) rotate(-1deg); } }
+
+  .narr { min-height: 64px; display: flex; gap: 10px; align-items: flex-start; }
+  .narr .mic { font-size: 22px; }
+  .narr p { font-size: 15.5px; line-height: 1.5; }
+  .narr p.waiting { color: var(--dim); font-style: italic; }
+
+  .chartcard.hot { border-color: var(--stamp); box-shadow: 0 0 0 3px rgba(200,16,46,.15); }
+  .chartwrap { background: var(--board); border-radius: 8px; padding: 10px 8px 6px; }
+  canvas { width: 100%; height: 120px; display: block; }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--dim); margin-top: 8px;
+            font-family: 'Courier New', monospace; }
+  .picks { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pick { border: 1.5px solid #D8CDB4; border-radius: 999px; padding: 5px 12px;
+          font-size: 12.5px; color: var(--dim); transition: all .4s; background: var(--paper); }
+  .pick.win { border-color: var(--green); color: var(--green); font-weight: 700;
+              background: rgba(27,77,62,.06); }
+  .pick.lose { opacity: .45; }
+  .board .row { display: flex; justify-content: space-between; padding: 6px 2px;
+                font-size: 15px; border-bottom: 1px dashed #D8CDB4; }
+  .board .row:last-child { border-bottom: none; }
+  .btn { cursor: pointer; border: none; border-radius: 8px; padding: 14px 22px;
+         font-size: 16px; letter-spacing: 1px; background: var(--stamp); color: #fff;
+         width: 100%; font-family: 'Graduate', serif;
+         box-shadow: 3px 3px 0 rgba(38,34,26,.35); transform: rotate(-.3deg); }
+  .btn[disabled] { opacity: .55; cursor: default; }
+  .proof { font-size: 13.5px; color: var(--dim); line-height: 1.7; }
+  .proof b { color: var(--ink); }
+  .proof a { color: var(--green); word-break: break-all; }
+  .verifying { color: var(--stamp); font-family: 'Courier New', monospace; font-size: 13px;
+               letter-spacing: 1px; }
+  .verified { color: var(--green); font-weight: 700; }
+  footer { margin: 26px 0 4px; text-align: center; font-size: 14px; color: var(--dim); }
+  footer a { color: var(--green); font-weight: 700; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
-  <span class="badge"><span class="dot"></span> REPLAY TxLINE — DADOS REAIS GRAVADOS</span>
-  <h1 id="title">França × Espanha — semifinal</h1>
-  <p class="sub">Replay fiel da semifinal, reproduzido pelo <b>mesmo pipeline</b> que roda ao vivo:
+  <div class="topline">
+    <span class="badge"><span class="dot"></span>
+      <span data-en="REPLAY TxLINE — REAL RECORDED DATA">REPLAY TxLINE — DADOS REAIS GRAVADOS</span></span>
+    <div class="lang" role="group" aria-label="Language">
+      <button class="langbtn" data-lang="pt">PT</button>
+      <button class="langbtn" data-lang="en">EN</button>
+    </div>
+  </div>
+  <h1 class="display" id="title">França × Espanha — semifinal</h1>
+  <p class="sub" data-en="A faithful replay of the semifinal through the <b>same pipeline</b> that runs live: TxLINE SSE feed → settlement engine → AI narrator (DeepSeek + ElevenLabs). Nothing is scripted — events, odds and audio come from the recording of the real feed (devnet). Live, the goal shout fires instantly and the full narration lands ~10s later; the replay shortens the waits.">Replay fiel da semifinal, reproduzido pelo <b>mesmo pipeline</b> que roda ao vivo:
      feed SSE da TxLINE → engine de settlement → narrador AI (DeepSeek + ElevenLabs).
-     Nada aqui é roteirizado — os eventos, odds e áudios vêm da gravação do feed real (devnet).</p>
+     Nada é roteirizado — eventos, odds e áudios vêm da gravação do feed real (devnet).
+     Ao vivo, o grito sai na hora e a narração completa chega ~10s depois; o replay encurta as esperas.</p>
 
   <div class="stage">
     <div class="card">
       <div class="score">
         <div class="team" id="home">França</div>
-        <div class="num"><span id="h">0</span>&nbsp;×&nbsp;<span id="a">0</span></div>
+        <div class="nums">
+          <div class="flap" id="h">0</div>
+          <span class="x">×</span>
+          <div class="flap" id="a">0</div>
+        </div>
         <div class="team right" id="away">Espanha</div>
       </div>
-      <div class="phase" id="phase">aguardando bola rolar…</div>
+      <div class="phase" id="phase" data-en="waiting for kickoff…">aguardando bola rolar…</div>
     </div>
 
     <div class="card narr">
       <div class="mic">🎙️</div>
       <div style="flex:1">
-        <div class="label">Narrador AI — voz + transcrição (acessibilidade)</div>
-        <p id="text">Aperta o play que a resenha começa.</p>
+        <div class="label" data-en="AI narrator — voice + transcript (accessibility)">Narrador AI — voz + transcrição (acessibilidade)</div>
+        <p id="text" data-en="Hit play and the banter begins.">Aperta o play que a resenha começa.</p>
       </div>
     </div>
 
-    <div class="card">
-      <div class="label" style="font-size:11px;color:var(--dim);letter-spacing:1px;
-           text-transform:uppercase;margin-bottom:6px">
-        Odds 1X2 ao vivo (StablePrice · /api/odds/stream)</div>
-      <canvas id="chart" width="580" height="120"></canvas>
+    <div class="card chartcard" id="chartcard">
+      <div class="label" data-en="Live 1X2 odds (StablePrice · /api/odds/stream)">Odds 1X2 ao vivo (StablePrice · /api/odds/stream)</div>
+      <div class="chartwrap"><canvas id="chart" width="580" height="120"></canvas></div>
       <div class="legend">
-        <span style="color:#58a6ff"><b>■</b> França</span>
-        <span style="color:#8b949e"><b>■</b> Empate</span>
-        <span style="color:#f0883e"><b>■</b> Espanha</span>
+        <span style="color:#D9A441"><b>■</b> <span id="lg-home">França</span></span>
+        <span style="color:#8a8371"><b>■</b> <span id="lg-draw">Empate</span></span>
+        <span style="color:#C8102E"><b>■</b> <span id="lg-away">Espanha</span></span>
       </div>
     </div>
 
     <div class="card">
-      <div class="label" style="font-size:11px;color:var(--dim);letter-spacing:1px;
-           text-transform:uppercase;margin-bottom:8px">
-        Palpites do grupo (odd congelada no toque · pontos = 100 × odd)</div>
+      <div class="label" data-en="The group's picks (odds frozen on tap · points = 100 × odds)">Palpites do grupo (odd congelada no toque · pontos = 100 × odd)</div>
       <div class="picks" id="picks"></div>
     </div>
 
     <div class="card board hidden" id="board">
-      <div class="label" style="font-size:11px;color:var(--dim);letter-spacing:1px;
-           text-transform:uppercase;margin-bottom:6px">🏁 Settlement automático — classificação</div>
+      <div class="label" data-en="🏁 Automatic settlement — standings">🏁 Settlement automático — classificação</div>
       <div id="rows"></div>
     </div>
 
-    <button class="btn" id="play">▶ Dar o play na resenha (com som)</button>
+    <button class="btn" id="play" data-en="▶ Play the banter (sound on)">▶ Dar o play na resenha (com som)</button>
 
     <div class="card proof">
-      <b style="color:var(--txt)">🔐 Prova on-chain (Solana devnet)</b><br>
-      Resultado final (0×2) verificado contra a Merkle root da TxLINE via
-      <code>validateStatV2</code>, sem árbitro humano:<br>
-      <a target="_blank" rel="noopener"
-         href="https://explorer.solana.com/tx/44Ye9Vxs972wtgUex4dLoyijLZgWJdf8NnrHn5mEE3iBXCGJF1gtDBiffGFqBB79pxYhKd6JUtoaLxzkMJb3AW9Z?cluster=devnet">
-         tx 44Ye9Vxs…MJb3AW9Z ↗</a><br>
-      Assinatura TxLINE (Subscribe, acesso 100% via wallet):
-      <a target="_blank" rel="noopener"
-         href="https://explorer.solana.com/tx/4NVWMuouHN42RbfwswrnEgPGDAZP2e4R7BRLnYZdhLHLqerVu4cgFKpHi9wP3fZf93WZ3GmBFRykEuHL4cTe1beD?cluster=devnet">
-         tx 4NVWMuou…4cTe1beD ↗</a>
+      <b data-en="🔐 On-chain proof (Solana devnet)">🔐 Prova on-chain (Solana devnet)</b><br>
+      <span id="verify" class="hidden verifying"></span>
+      <span id="prooftext" data-en="The final result (0×2) is checked against TxLINE's Merkle root via <code>validateStatV2</code> — no human referee. Hit play to watch the check happen at the final whistle.">O resultado final (0×2) é conferido contra a Merkle root da TxLINE via
+      <code>validateStatV2</code> — sem árbitro humano. Dá o play pra ver a conferência
+      acontecer no apito final.</span>
+      <div id="prooflinks" class="hidden">
+        <a target="_blank" rel="noopener"
+           href="https://explorer.solana.com/tx/44Ye9Vxs972wtgUex4dLoyijLZgWJdf8NnrHn5mEE3iBXCGJF1gtDBiffGFqBB79pxYhKd6JUtoaLxzkMJb3AW9Z?cluster=devnet">
+           tx 44Ye9Vxs…MJb3AW9Z ↗</a><br>
+        <span data-en="TxLINE signature (Subscribe, 100% wallet-based access):">Assinatura TxLINE (Subscribe, acesso 100% via wallet):</span>
+        <a target="_blank" rel="noopener"
+           href="https://explorer.solana.com/tx/4NVWMuouHN42RbfwswrnEgPGDAZP2e4R7BRLnYZdhLHLqerVu4cgFKpHi9wP3fZf93WZ3GmBFRykEuHL4cTe1beD?cluster=devnet">
+           tx 4NVWMuou…4cTe1beD ↗</a>
+      </div>
     </div>
   </div>
 
   <footer>
-    Curtiu? A versão ao vivo roda dentro do grupo:
+    <span data-en="Like it? The live version runs inside the group:">Curtiu? A versão ao vivo roda dentro do grupo:</span>
     <a href="https://t.me/torcidaapp_bot/app">t.me/torcidaapp_bot/app</a> ·
-    <a href="/">landing</a>
+    <a href="/">landing</a> · <a href="/retro" data-en="form guide">retrospecto</a>
   </footer>
 
 <script>
 (async () => {
+  /* ---------- i18n: shares the landing's stored choice; ?lang= overrides ---- */
+  const urlLang = new URLSearchParams(location.search).get('lang');
+  let LANG = (function () {
+    try { return urlLang || localStorage.getItem('torcida_lang') || 'pt'; }
+    catch (e) { return urlLang || 'pt'; }
+  })();
+  const T = (pt, en) => LANG === 'en' ? en : pt;
+
   const demo = await (await fetch('/demo/demo.json')).json();
   const $ = id => document.getElementById(id);
   const beats = demo.timeline, odds = demo.odds;
-  const sel2team = {'1':'França','X':'Empate','2':'Espanha'};
 
-  // group picks
-  const renderPicks = (leading) => {
+  const TEAMS = { pt: ['França', 'Espanha', 'Empate'], en: ['France', 'Spain', 'Draw'] };
+  const bText = b => (LANG === 'en' && b.text_en) ? b.text_en : b.text;
+  const bAudio = b => (LANG === 'en' && b.audio_en) ? b.audio_en : b.audio;
+
+  function applyLang(lang) {
+    LANG = (lang === 'en') ? 'en' : 'pt';
+    document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+    document.querySelectorAll('[data-en]').forEach(el => {
+      if (el.dataset.pt === undefined) el.dataset.pt = el.innerHTML;
+      el.innerHTML = LANG === 'en' ? el.dataset.en : el.dataset.pt;
+    });
+    document.querySelectorAll('.langbtn').forEach(b =>
+      b.classList.toggle('on', b.dataset.lang === LANG));
+    const [h, a, d] = TEAMS[LANG];
+    $('title').textContent = `${h} × ${a} — ${T('semifinal', 'semi-final')}`;
+    $('home').textContent = h; $('away').textContent = a;
+    $('lg-home').textContent = h; $('lg-away').textContent = a;
+    $('lg-draw').textContent = d;
+    document.title = T('Torcida — REPLAY TxLINE (demo pro júri)',
+                       'Torcida — TxLINE REPLAY (judge demo)');
+    try { localStorage.setItem('torcida_lang', LANG); } catch (e) {}
+    renderPicks(lastLeading);
+  }
+  document.querySelectorAll('.langbtn').forEach(b =>
+    b.addEventListener('click', () => applyLang(b.dataset.lang)));
+
+  /* ---------- group picks --------------------------------------------------- */
+  const selName = s => s === '1' ? TEAMS[LANG][0] : s === '2' ? TEAMS[LANG][1] : TEAMS[LANG][2];
+  let lastLeading = null;
+  function renderPicks(leading) {
+    lastLeading = leading;
     $('picks').innerHTML = demo.players.map(p => {
       const cls = !leading ? '' : (p.selection === leading ? 'win' : 'lose');
-      return `<span class="pick ${cls}">${p.name} · ${sel2team[p.selection]}
-              @ ${p.odds.toFixed(2)} · vale ${Math.round(p.odds*100)} pts</span>`;
+      return `<span class="pick ${cls}">${p.name} · ${selName(p.selection)}
+              @ ${p.odds.toFixed(2)} · ${T('vale', 'worth')} ${Math.round(p.odds * 100)} pts</span>`;
     }).join('');
-  };
-  renderPicks(null);
+  }
 
-  // odds chart drawn up to a time limit
+  /* ---------- odds chart (brand colors on the dark board) ------------------- */
   const ctx = $('chart').getContext('2d');
-  const W = 580, H = 120, PAD = 6;
-  // clamp the y-scale: a losing side's odds balloon (20+) and would squash
-  // the readable 1-8 band where the whole story happens
-  const O_CAP = 8;
+  const W = 580, H = 120, PAD = 6, O_CAP = 8;
   const tMax = demo.duration,
         oMax = Math.min(O_CAP, Math.max(...odds.flatMap(o => o.slice(1))));
-  const colors = ['#58a6ff', '#8b949e', '#f0883e'];
+  const colors = ['#D9A441', '#8a8371', '#C8102E'];
   function draw(tLimit) {
     ctx.clearRect(0, 0, W, H);
     for (let s = 0; s < 3; s++) {
@@ -163,15 +258,14 @@
       let started = false;
       for (const row of odds) {
         if (row[0] > tLimit) break;
-        const x = PAD + (row[0] / tMax) * (W - 2*PAD);
-        const v = Math.min(O_CAP, row[s+1]);
-        const y = H - PAD - ((v - 1) / (oMax - 1)) * (H - 2*PAD);
+        const x = PAD + (row[0] / tMax) * (W - 2 * PAD);
+        const v = Math.min(O_CAP, row[s + 1]);
+        const y = H - PAD - ((v - 1) / (oMax - 1)) * (H - 2 * PAD);
         started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true;
       }
       ctx.stroke();
     }
   }
-  draw(0);
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   async function animateChart(from, to, ms) {
@@ -191,41 +285,111 @@
     });
   }
 
+  function setScore(h, a) {
+    for (const [id, v] of [['h', h], ['a', a]]) {
+      const el = $(id);
+      if (el.textContent != v) {
+        el.classList.add('flip');
+        setTimeout(() => { el.textContent = v; }, 180);
+        setTimeout(() => el.classList.remove('flip'), 400);
+      }
+    }
+  }
+
+  /* ---------- the replay ----------------------------------------------------- */
   let running = false;
   async function run() {
     if (running) return; running = true;
-    $('play').disabled = true; $('play').textContent = '📺 AO VIVO (replay)…';
+    $('play').disabled = true;
+    $('play').textContent = T('📺 AO VIVO (replay)…', '📺 LIVE (replay)…');
     $('board').classList.add('hidden');
-    $('h').textContent = 0; $('a').textContent = 0;
-    renderPicks(null);
+    $('prooflinks').classList.add('hidden');
+    $('verify').classList.add('hidden');
+    $('prooftext').classList.remove('hidden');
+    setScore(0, 0); renderPicks(null);
+    $('text').className = ''; draw(0);
     let prevT = 0;
     for (const beat of beats) {
       await animateChart(prevT, beat.at, beat.kind === 'phase' ? 1600 : 2600);
       prevT = beat.at;
       const [h, a] = beat.score;
-      $('h').textContent = h; $('a').textContent = a;
+
       if (beat.kind === 'phase') {
-        $('phase').textContent = beat.text;
+        setScore(h, a);
+        $('phase').className = 'phase';
+        $('phase').textContent = bText(beat);
         await sleep(2200);
         continue;
       }
-      $('phase').textContent = beat.kind === 'final' ? '🏁 Fim de jogo' : '⚽ GOL!';
-      $('text').textContent = beat.text;
+
+      if (beat.kind === 'odds') {                 // the market-move call
+        $('phase').className = 'phase';
+        $('phase').textContent = T('📉 o mercado mexeu…', '📉 the market just moved…');
+        $('chartcard').classList.add('hot');
+        $('text').className = ''; $('text').textContent = bText(beat);
+        const au = bAudio(beat);
+        if (au) await playAudio(au); else await sleep(6000);
+        $('chartcard').classList.remove('hot');
+        await sleep(800);
+        continue;
+      }
+
+      if (beat.kind === 'goal') {                 // instant shout, then the call
+        setScore(h, a);
+        $('phase').className = 'phase shout';
+        $('phase').textContent = T('⚽ GOOOOL!', '⚽ GOOOAL!');
+        $('text').className = 'waiting';
+        $('text').textContent = T('🎙️ o narrador tá chegando… (ao vivo: grito na hora, narração ~10s)',
+                                  '🎙️ narrator incoming… (live: instant shout, full call ~10s later)');
+        await sleep(2200);
+        $('text').className = ''; $('text').textContent = bText(beat);
+        renderPicks(h === a ? 'X' : (h > a ? '1' : '2'));
+        const au = bAudio(beat);
+        if (au) await playAudio(au); else await sleep(6000);
+        await sleep(1000);
+        continue;
+      }
+
+      // final whistle: narration, then the on-chain check as its own moment
+      setScore(h, a);
+      $('phase').className = 'phase';
+      $('phase').textContent = T('🏁 Fim de jogo', '🏁 Full-time');
+      $('text').className = ''; $('text').textContent = bText(beat);
       renderPicks(h === a ? 'X' : (h > a ? '1' : '2'));
-      if (beat.kind === 'final' && beat.standings) {
+      const au = bAudio(beat);
+      if (au) await playAudio(au); else await sleep(6000);
+
+      $('prooftext').classList.add('hidden');
+      const v = $('verify');
+      v.classList.remove('hidden');
+      v.className = 'verifying';
+      for (const step of [T('conferindo na blockchain', 'checking on-chain'),
+                          'validateStatV2 · Merkle proof',
+                          T('resultado 0×2 contra a root TxLINE…', 'result 0×2 vs TxLINE root…')]) {
+        v.textContent = '🔐 ' + step + ' ';
+        for (let i = 0; i < 3; i++) { v.textContent += '·'; await sleep(320); }
+      }
+      v.className = 'verified';
+      v.innerHTML = '✓ ' + T('Resultado verificado on-chain — sem árbitro humano.',
+                             'Result verified on-chain — no human referee.') + '<br>';
+      $('prooflinks').classList.remove('hidden');
+
+      if (beat.standings) {
         $('board').classList.remove('hidden');
         $('rows').innerHTML = beat.standings.map((r, i) =>
-          `<div class="row"><span>${['🥇','🥈','🥉'][i] ?? (i+1)+'.'} ${r[0]}</span>
+          `<div class="row"><span>${['🥇', '🥈', '🥉'][i] ?? (i + 1) + '.'} ${r[0]}</span>
            <b>${r[1]} pts</b></div>`).join('');
       }
-      if (beat.audio) await playAudio(beat.audio); else await sleep(6000);
-      await sleep(1200);
     }
     $('play').disabled = false;
-    $('play').textContent = '🔁 Rever o replay';
+    $('play').textContent = T('🔁 Rever o replay', '🔁 Watch it again');
     running = false;
   }
   $('play').onclick = run;
+
+  applyLang(LANG);
+  renderPicks(null);
+  draw(0);
 })();
 </script>
 </body>

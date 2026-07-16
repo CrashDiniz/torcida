@@ -29,7 +29,21 @@
     1
    ],
    "text": "GOOOOOOL! Espanha balançou a rede, bola na rede! Espanha 1 pra 0 França, e a Bia tá pulando, cravou Espanha e agora só falta a taça pra ela!",
-   "audio": "gol1.mp3"
+   "audio": "gol1.mp3",
+   "text_en": "GOOOOAL! Spain finds the net! Spain 1, France 0 — and Bia is bouncing: she called Spain and she's already polishing the trophy!",
+   "audio_en": "gol1_en.mp3"
+  },
+  {
+   "at": 2100.0,
+   "kind": "odds",
+   "score": [
+    0,
+    1
+   ],
+   "text": "📉 O mercado sentiu o golpe: Espanha despencou de 3.39 pra 1.88 — quem quiser a zebra agora paga caro. A Bia carimbou 3.35 antes da bola rolar. Palpite congelado não muda: isso é faro.",
+   "audio": "odds.mp3",
+   "text_en": "📉 The market felt that one: Spain crashed from 3.39 to 1.88 — the underdog premium is gone. Bia stamped 3.35 before kickoff. A frozen pick never moves: that's a nose for it.",
+   "audio_en": "odds_en.mp3"
   },
   {
    "at": 3568.9,
@@ -38,7 +52,8 @@
     0,
     1
    ],
-   "text": "🟡 Intervalo"
+   "text": "🟡 Intervalo",
+   "text_en": "🟡 Half-time"
   },
   {
    "at": 4473.9,
@@ -47,7 +62,8 @@
     0,
     1
    ],
-   "text": "🟢 Bola rolando — 2º tempo!"
+   "text": "🟢 Bola rolando — 2º tempo!",
+   "text_en": "🟢 Second half under way!"
   },
   {
    "at": 5253.5,
@@ -57,7 +73,9 @@
     2
    ],
    "text": "Bia palpitou certinho e tá voando no bolão! É GOL DA ESPANHA! A Espanha faz o segundo e fica 2 pra Espanha e 0 pra França!",
-   "audio": "gol2.mp3"
+   "audio": "gol2.mp3",
+   "text_en": "Bia called it and she's flying up the board! GOAL FOR SPAIN! 2 for Spain, 0 for France!",
+   "audio_en": "gol2_en.mp3"
   },
   {
    "at": 5427.2,
@@ -67,7 +85,9 @@
     3
    ],
    "text": "É GOL! Espanha marca e abre 3 pra Espanha e 0 pra França! A Bia palpitou certinho, ela tá voando no bolão!",
-   "audio": "gol3.mp3"
+   "audio": "gol3.mp3",
+   "text_en": "GOAL! Spain scores again — 3 for Spain, 0 for France! Bia nailed the pick — untouchable tonight!",
+   "audio_en": "gol3_en.mp3"
   },
   {
    "at": 5453.0,
@@ -76,7 +96,8 @@
     0,
     2
    ],
-   "text": "❌ VAR: gol anulado — placar volta pra 0 x 2"
+   "text": "❌ VAR: gol anulado — placar volta pra 0 x 2",
+   "text_en": "❌ VAR: goal disallowed — back to 0 x 2"
   },
   {
    "at": 7620.2,
@@ -100,7 +121,9 @@
      "Léo",
      0
     ]
-   ]
+   ],
+   "text_en": "Full-time — the pool is closed! Spain 2, France 0! And the champion is Bia, with 335 points — she smoked it, Léo and Crash stuck on zero!",
+   "audio_en": "final_en.mp3"
   }
  ],
  "odds": [
@@ -854,5 +877,6 @@
    47.6,
    1.02
   ]
- ]
+ ],
+ "label_en": "France x Spain"
 }
