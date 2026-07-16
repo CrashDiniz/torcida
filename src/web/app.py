@@ -946,6 +946,15 @@ async def api_recap() -> JSONResponse:
     return JSONResponse(await _recap_payload())
 
 
+@app.get("/og.png")
+async def og_image():
+    """Link-preview card (og:image) for torcida.app."""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).resolve().parents[2] / "landing" / "og.png",
+                        media_type="image/png")
+
+
 @app.get("/retro", response_class=HTMLResponse)
 async def retro() -> str:
     """Retrospecto: team stats of the played games + odds for the next ones."""
