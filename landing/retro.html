@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retrospecto — Torcida</title>
+<meta name="description" content="Os números dos últimos jogos e as odds dos próximos, direto do feed TxODDS. Estude antes de palpitar.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Graduate&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F1E9D8; --ink: #26221A; --green: #1B4D3E; --green-dk: #143C30;
+    --stamp: #C8102E; --gold: #D9A441;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: 'Crimson Pro', Georgia, serif; font-size: 18px;
+    background-image: radial-gradient(rgba(38,34,26,.05) 1px, transparent 1px);
+    background-size: 5px 5px;
+  }
+  .display { font-family: 'Graduate', Georgia, serif; }
+
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; border-bottom: 3px double var(--gold);
+    background: var(--green); color: var(--paper);
+  }
+  nav .brand { display: flex; align-items: center; gap: 10px; color: var(--paper); text-decoration: none; }
+  nav .crest {
+    width: 38px; height: 38px; border: 2px solid var(--paper); border-radius: 50%;
+    display: grid; place-items: center; font-size: 18px;
+    background: repeating-linear-gradient(90deg, var(--green) 0 5px, var(--green-dk) 5px 10px);
+  }
+  nav .name { font-size: 20px; letter-spacing: 3px; }
+  .lang { display: flex; gap: 3px; }
+  .langbtn {
+    background: transparent; color: var(--paper); border: 1px solid var(--gold);
+    padding: 4px 9px; font-size: 12px; letter-spacing: 1px; cursor: pointer;
+    border-radius: 3px; font-family: 'Graduate', serif; opacity: .55; line-height: 1;
+  }
+  .langbtn.on { background: var(--gold); color: var(--green-dk); opacity: 1; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 30px; }
+  .est {
+    color: var(--stamp); font-size: 12px; letter-spacing: 4px;
+    text-transform: uppercase; text-align: center; margin-bottom: 14px;
+  }
+  h1 { text-align: center; font-size: clamp(30px, 5vw, 44px); letter-spacing: 2px; }
+  p.sub { text-align: center; max-width: 520px; margin: 12px auto 0; color: #4A4334; }
+
+  h2.sec {
+    font-size: 15px; letter-spacing: 3px; text-transform: uppercase; color: var(--green);
+    border-bottom: 2px solid var(--gold); display: inline-block;
+    padding-bottom: 4px; margin: 36px 0 14px;
+  }
+  .card {
+    background: #FBF6EA; border: 2px solid var(--gold); border-radius: 10px;
+    box-shadow: 0 5px 0 rgba(38,34,26,.16); padding: 18px; margin-bottom: 14px;
+  }
+  .matchline { display: flex; align-items: baseline; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .matchline .team { font-size: 19px; letter-spacing: 1px; }
+  .matchline .score { font-size: 30px; color: var(--green); letter-spacing: 2px; }
+  .when {
+    text-align: center; font-family: 'Courier New', monospace; font-size: 12px;
+    color: #6E6552; margin-top: 4px; letter-spacing: 1px;
+  }
+  table.stats { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 15.5px; }
+  table.stats td { padding: 5px 4px; border-top: 1px dashed #D8CDB4; }
+  table.stats td.mid { text-align: center; color: #6E6552; font-size: 13px;
+                       font-family: 'Courier New', monospace; letter-spacing: 1px;
+                       text-transform: uppercase; width: 44%; }
+  table.stats td.hv { text-align: left; font-weight: 600; width: 28%; }
+  table.stats td.av { text-align: right; font-weight: 600; width: 28%; }
+  .oddsrow { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+  .odd {
+    border: 1.5px solid var(--green); border-radius: 6px; padding: 7px 12px;
+    text-align: center; min-width: 92px; background: var(--paper);
+  }
+  .odd .k { font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+            color: #6E6552; font-family: 'Courier New', monospace; }
+  .odd .v { font-size: 21px; color: var(--green); font-weight: 600; }
+  .odd .pts { font-size: 11.5px; color: var(--stamp); }
+  .zebra {
+    margin: 26px auto 0; text-align: center; border: 2px dashed var(--stamp);
+    color: var(--stamp); border-radius: 6px; padding: 10px 14px; max-width: 560px;
+    font-size: 15.5px; transform: rotate(-.4deg); background: rgba(200,16,46,.04);
+  }
+  .note { text-align: center; color: #6E6552; font-size: 14px; margin-top: 22px; font-style: italic; }
+  .actions { text-align: center; margin-top: 24px; }
+  .btn {
+    display: inline-block; text-decoration: none; padding: 13px 26px;
+    border-radius: 5px; font-size: 16px; letter-spacing: 1px;
+    background: var(--stamp); color: #fff;
+    box-shadow: 3px 3px 0 rgba(38,34,26,.4); transform: rotate(-.6deg);
+  }
+  footer { text-align: center; padding: 26px 16px 34px; color: #6E6552; font-size: 14px; }
+  footer a { color: var(--green); }
+  .loading { text-align: center; color: #6E6552; font-family: 'Courier New', monospace;
+             letter-spacing: 2px; padding: 30px 0; }
+</style>
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">
+    <div class="crest">⚽</div>
+    <div class="name display">TORCIDA</div>
+  </a>
+  <div class="lang" role="group" aria-label="Language">
+    <button class="langbtn" data-lang="pt">PT</button>
+    <button class="langbtn" data-lang="en">EN</button>
+  </div>
+</nav>
+
+<main>
+  <div class="est display" data-en="★ Match archive · straight from the TxODDS feed ★">★ Arquivo de jogos · direto do feed TxODDS ★</div>
+  <h1 class="display" data-en="Form guide">Retrospecto</h1>
+  <p class="sub" data-en="What the numbers said in the last matches — and what the odds say about the next ones. Study first, pick later.">O que os números disseram nos últimos jogos — e o que as odds dizem
+     sobre os próximos. Estuda primeiro, palpita depois.</p>
+
+  <div id="content"><div class="loading" data-en="LOADING THE ARCHIVE…">ABRINDO O ARQUIVO…</div></div>
+
+  <div class="zebra display" data-en="🦓 Underdogs pay more: points = 100 × your pick's odds">🦓 Zebra vale mais: pontos = 100 × odd do seu palpite</div>
+
+  <p class="note" data-en="Team-level stats from the pro feed (TxODDS) — no lineups here, the feed tracks the collective. Odds move until kickoff.">Stats por equipe, direto do feed profissional (TxODDS) — sem escalação,
+     o feed acompanha o coletivo. As odds se movem até a bola rolar.</p>
+
+  <div class="actions">
+    <a class="btn display" href="https://t.me/+B0SVEoGVrnxlYWFh"
+       data-en="🎫 Take your pick in the group">🎫 Palpita lá no grupo</a>
+  </div>
+</main>
+
+<footer>
+  ⚽ <a href="/">torcida.app</a> · <a href="https://t.me/torcidaapp_bot">@torcidaapp_bot</a>
+</footer>
+
+<script>
+/* i18n: same storage key as the landing so the choice follows the visitor */
+let LANG = (function () {
+  try { return localStorage.getItem('torcida_lang') || 'pt'; } catch (e) { return 'pt'; }
+})();
+const T = (pt, en) => LANG === 'en' ? en : pt;
+
+function applyLang(lang) {
+  LANG = (lang === 'en') ? 'en' : 'pt';
+  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+  document.querySelectorAll('[data-en]').forEach(function (el) {
+    if (el.dataset.pt === undefined) el.dataset.pt = el.innerHTML;
+    el.innerHTML = LANG === 'en' ? el.dataset.en : el.dataset.pt;
+  });
+  document.querySelectorAll('.langbtn').forEach(function (b) {
+    b.classList.toggle('on', b.dataset.lang === LANG);
+  });
+  try { localStorage.setItem('torcida_lang', LANG); } catch (e) {}
+  if (window.__recap) render(window.__recap);
+}
+document.querySelectorAll('.langbtn').forEach(function (b) {
+  b.addEventListener('click', function () { applyLang(b.dataset.lang); });
+});
+
+function fmtWhen(ms) {
+  if (!ms) return '';
+  const d = new Date(ms), loc = LANG === 'en' ? 'en-US' : 'pt-BR';
+  return d.toLocaleDateString(loc, { weekday: 'short', day: '2-digit', month: '2-digit' })
+       + ' · ' + d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+}
+
+function statRow(label, hv, av) {
+  return `<tr><td class="hv">${hv}</td><td class="mid">${label}</td><td class="av">${av}</td></tr>`;
+}
+
+function playedCard(g) {
+  const rows = [
+    statRow(T('intervalo', 'half-time'), g.h.ht_goals, g.a.ht_goals),
+    statRow(T('escanteios', 'corners'), g.h.corners, g.a.corners),
+    statRow(T('amarelos', 'yellow cards'), g.h.yellows, g.a.yellows),
+  ];
+  if (g.h.reds || g.a.reds) rows.push(statRow(T('vermelhos', 'red cards'), g.h.reds, g.a.reds));
+  return `<div class="card">
+    <div class="matchline display">
+      <span class="team">${g.home}</span>
+      <span class="score">${g.h.goals} × ${g.a.goals}</span>
+      <span class="team">${g.away}</span>
+    </div>
+    <div class="when">${fmtWhen(g.start)} · ${T('encerrado', 'full-time')}</div>
+    <table class="stats">${rows.join('')}</table>
+  </div>`;
+}
+
+function oddBox(k, v) {
+  if (v == null) return '';
+  return `<div class="odd"><div class="k">${k}</div><div class="v">${v.toFixed(2)}</div>
+          <div class="pts">${T('vale', 'worth')} ${Math.round(v * 100)} pts</div></div>`;
+}
+
+function nextCard(g) {
+  const o = g.odds;
+  const odds = o ? `<div class="oddsrow">
+      ${oddBox(g.home, o.home)}${oddBox(T('empate', 'draw'), o.draw)}${oddBox(g.away, o.away)}
+    </div>` : `<div class="when">${T('odds em breve no feed', 'odds soon on the feed')}</div>`;
+  return `<div class="card">
+    <div class="matchline display">
+      <span class="team">${g.home}</span>
+      <span class="score">×</span>
+      <span class="team">${g.away}</span>
+    </div>
+    <div class="when">${fmtWhen(g.start)}</div>
+    ${odds}
+  </div>`;
+}
+
+function render(data) {
+  const parts = [];
+  if (data.played && data.played.length) {
+    parts.push(`<h2 class="sec display">${T('Últimos jogos', 'Last matches')}</h2>`);
+    parts.push(...data.played.map(playedCard));
+  }
+  if (data.next && data.next.length) {
+    parts.push(`<h2 class="sec display">${T('Próximos jogos · odds de agora', 'Next matches · current odds')}</h2>`);
+    parts.push(...data.next.map(nextCard));
+  }
+  if (!parts.length) {
+    parts.push(`<div class="loading">${T('SEM JOGOS NO ARQUIVO AINDA', 'NOTHING IN THE ARCHIVE YET')}</div>`);
+  }
+  document.getElementById('content').innerHTML = parts.join('');
+}
+
+applyLang(LANG);
+fetch('/api/recap', { cache: 'no-store' })
+  .then(r => r.json())
+  .then(d => { window.__recap = d; render(d); })
+  .catch(() => {
+    document.getElementById('content').innerHTML =
+      `<div class="loading">${T('ARQUIVO INDISPONÍVEL AGORA', 'ARCHIVE UNAVAILABLE RIGHT NOW')}</div>`;
+  });
+</script>
+</body>
+</html>

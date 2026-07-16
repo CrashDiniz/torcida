@@ -425,6 +425,63 @@ async def _live_payload() -> dict:
     return payload
 
 
+# --- retrospect: finished-game team stats + odds for the games ahead ----------
+
+_recap_cache: tuple[float, dict] = (0.0, {})
+RECAP_TTL_S = 120
+RECAP_LOOKBACK_DAYS = 4
+
+
+def _side_stats(block: dict) -> dict:
+    tot, ht = block.get("Total") or {}, block.get("HT") or {}
+    return {"goals": tot.get("Goals", 0), "ht_goals": ht.get("Goals", 0),
+            "corners": tot.get("Corners", 0), "yellows": tot.get("YellowCards", 0),
+            "reds": tot.get("RedCards", 0)}
+
+
+async def _recap_payload() -> dict:
+    """Team stats of recently finished fixtures (the feed's per-half Score
+    block: goals, corners, cards) plus current 1X2 odds for the games ahead.
+    Fuels the /retro research page — the feed is team-level, no lineups."""
+    global _recap_cache
+    ts, cached = _recap_cache
+    if cached and time.time() - ts < RECAP_TTL_S:
+        return cached
+    now = time.time()
+    fx = sorted(await txline.fixtures(
+                    start_epoch_day=int(now // 86400) - RECAP_LOOKBACK_DAYS),
+                key=lambda f: f.get("StartTime") or 0)
+    played, upcoming = [], []
+    for f in fx:
+        base = {"home": pt(f.get("Participant1", "?")),
+                "away": pt(f.get("Participant2", "?")),
+                "start": f.get("StartTime")}
+        if (f.get("StartTime") or 0) / 1000 <= now:
+            try:
+                snap = await txline.scores_snapshot(f["FixtureId"])
+            except Exception:
+                continue
+            sc = snapshot_score(snap)
+            ev = max((e for e in snap if isinstance(e, dict) and e.get("Score")),
+                     key=lambda e: e.get("Seq") or 0, default=None)
+            if not (sc and sc[3] and ev):
+                continue  # live or unfinished — the landing board covers it
+            played.append(base | {"h": _side_stats(ev["Score"].get("Participant1") or {}),
+                                  "a": _side_stats(ev["Score"].get("Participant2") or {})})
+        else:
+            odds = None
+            try:
+                od = parse_snapshot(await txline.odds_snapshot(f["FixtureId"]))
+                odds = {"home": round(od.home, 2), "draw": round(od.draw, 2),
+                        "away": round(od.away, 2)}
+            except Exception:
+                pass
+            upcoming.append(base | {"odds": odds})
+    payload = {"played": played, "next": upcoming}
+    _recap_cache = (time.time(), payload)
+    return payload
+
+
 @app.get("/api/live")
 async def live() -> dict:
     return await _live_payload()
@@ -881,6 +938,19 @@ async def landing() -> str:
     """torcida.app landing preview (deployed as static site on D4)."""
     from pathlib import Path
     page = Path(__file__).resolve().parents[2] / "landing" / "index.html"
+    return page.read_text(encoding="utf-8")
+
+
+@app.get("/api/recap")
+async def api_recap() -> JSONResponse:
+    return JSONResponse(await _recap_payload())
+
+
+@app.get("/retro", response_class=HTMLResponse)
+async def retro() -> str:
+    """Retrospecto: team stats of the played games + odds for the next ones."""
+    from pathlib import Path
+    page = Path(__file__).resolve().parents[2] / "landing" / "retro.html"
     return page.read_text(encoding="utf-8")
 
 
