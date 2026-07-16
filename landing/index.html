@@ -33,24 +33,39 @@
   }
   .display { font-family: 'Graduate', Georgia, serif; }
 
-  /* ---------- topbar ---------- */
+  /* ---------- topbar: centered logo, links bar below ---------- */
   nav {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 24px; border-bottom: 3px double var(--gold);
     background: var(--green); color: var(--paper);
+    border-bottom: 3px double var(--gold);
+    padding: 16px 16px 0;
   }
-  nav .brand { display: flex; align-items: center; gap: 10px; }
+  nav .brand {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+  }
   nav .crest {
-    width: 38px; height: 38px; border: 2px solid var(--paper); border-radius: 50%;
-    display: grid; place-items: center; font-size: 18px;
-    background: repeating-linear-gradient(90deg, var(--green) 0 5px, var(--green-dk) 5px 10px);
+    width: 32px; height: 42px; border: 2px solid var(--gold); border-radius: 6px;
+    display: grid; place-items: center; background: var(--flap);
+    position: relative; box-shadow: inset 0 -3px 0 rgba(0,0,0,.4);
   }
-  nav .name { font-size: 20px; letter-spacing: 3px; }
-  nav .navright { display: flex; align-items: center; gap: 14px; }
+  nav .crest::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+    background: rgba(0,0,0,.55);
+  }
+  nav .crest span { font-size: 20px; color: var(--paper); line-height: 1; }
+  nav .name { font-size: 24px; letter-spacing: 4px; }
+  nav .navbar {
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    flex-wrap: wrap; padding: 12px 0 14px;
+  }
+  nav .navbar a.navlink {
+    color: var(--paper); text-decoration: none; font-size: 15px;
+    letter-spacing: 1px; opacity: .85; border-bottom: 1px dotted var(--gold);
+  }
+  nav .navbar a.navlink:hover { opacity: 1; }
   nav a.cta {
     background: var(--stamp); color: #fff; text-decoration: none;
-    padding: 8px 18px; border-radius: 4px; font-size: 15px; letter-spacing: 1px;
-    box-shadow: 2px 2px 0 rgba(0,0,0,.35);
+    padding: 7px 16px; border-radius: 4px; font-size: 14px; letter-spacing: 1px;
+    box-shadow: 2px 2px 0 rgba(0,0,0,.35); white-space: nowrap;
   }
   .lang { display: flex; gap: 3px; }
   .langbtn {
@@ -60,9 +75,11 @@
   }
   .langbtn.on { background: var(--gold); color: var(--green-dk); opacity: 1; }
   @media (max-width: 480px) {
-    nav { padding: 12px 14px; }
-    nav .name { font-size: 17px; letter-spacing: 2px; }
-    nav a.cta { padding: 7px 12px; font-size: 13px; white-space: nowrap; }
+    nav { padding: 12px 10px 0; }
+    nav .name { font-size: 19px; letter-spacing: 3px; }
+    nav .navbar { gap: 10px; padding: 10px 0 12px; }
+    nav .navbar a.navlink { font-size: 13.5px; }
+    nav a.cta { padding: 6px 12px; font-size: 13px; }
   }
 
   /* ---------- hero ---------- */
@@ -128,6 +145,16 @@
   .board .live { color: var(--stamp); font-weight: bold; letter-spacing: 1px; }
   .board .live.on { animation: blink 1.2s infinite; }
   @keyframes blink { 50% { opacity: .3; } }
+  /* the grand final gets the gold treatment when the board flips to it */
+  .board.finale { animation: goldpulse 1.8s ease-in-out infinite; }
+  @keyframes goldpulse {
+    50% { box-shadow: 0 5px 0 rgba(38,34,26,.16), 0 0 22px rgba(217,164,65,.55); }
+  }
+  .board.finale .flap { background: var(--gold); color: #14120E;
+                        box-shadow: inset 0 -2px 0 rgba(0,0,0,.18); }
+  .board.finale .flap::after { background: rgba(0,0,0,.2); }
+  .board.finale .flap.space { background: none; box-shadow: none; }
+  .board .live.goldbadge { color: var(--gold); animation: blink 1.4s infinite; }
   .grouplink {
     color: var(--green); text-decoration: none; border: 1px solid var(--green);
     border-radius: 20px; padding: 3px 11px; font-family: Georgia, serif; font-size: 11px;
@@ -186,12 +213,12 @@
 
 <nav>
   <div class="brand">
-    <div class="crest">⚽</div>
-    <div>
-      <div class="name display">TORCIDA</div>
-    </div>
+    <div class="crest"><span class="display">T</span></div>
+    <div class="name display">TORCIDA</div>
   </div>
-  <div class="navright">
+  <div class="navbar">
+    <a class="navlink" href="#como" data-en="How it works">Como funciona</a>
+    <a class="navlink" href="/retro" data-en="📋 Form guide">📋 Retrospecto</a>
     <div class="lang" role="group" aria-label="Language">
       <button class="langbtn" data-lang="pt" type="button">PT</button>
       <button class="langbtn" data-lang="en" type="button">EN</button>
@@ -225,8 +252,6 @@
       <div class="foot">
         <span id="boardmeta">—</span>
         <span class="live" id="boardlive" style="visibility:hidden" data-en="● LIVE">● AO VIVO</span>
-        <a class="grouplink" href="/retro"
-           data-en="📋 form guide">📋 retrospecto</a>
         <a class="grouplink" href="https://t.me/+B0SVEoGVrnxlYWFh"
            data-en="▶ open Torcida">▶ abrir o Torcida</a>
       </div>
@@ -423,6 +448,8 @@ function refreshBoard() {
   stopCycle();
   const sport = liveData && liveData.sports.find(s => s.id === activeSport);
   if (!sport || !sport.active) {          // honest "coming" state for other sports
+    boardEl.parentElement.classList.remove('finale');
+    liveEl.classList.remove('goldbadge');
     setLine(LANG === 'en' ? 'SOON' : 'EM BREVE');
     metaEl.textContent = LANG === 'en' ? 'TxODDS schema ready' : 'Schema TxODDS pronto';
     liveEl.style.visibility = 'hidden';
@@ -430,6 +457,8 @@ function refreshBoard() {
   }
   const live = (liveData.soccer && liveData.soccer.live) || [];
   if (live.length) {
+    boardEl.parentElement.classList.remove('finale');
+    liveEl.classList.remove('goldbadge');
     liveEl.style.visibility = 'visible'; liveEl.classList.add('on');
     liveEl.textContent = LANG === 'en' ? '● LIVE' : '● AO VIVO';
     cycleIdx = 0;
@@ -440,17 +469,28 @@ function refreshBoard() {
     };
     show();
     if (live.length > 1) cycleTimer = setInterval(show, 4200);
-  } else {                                // no live game — show the next kickoff
+  } else {                                // no live game — cycle the kickoffs ahead
     liveEl.classList.remove('on');
-    const nx = liveData.soccer && liveData.soccer.next;
-    if (nx) {
+    const up = (liveData.soccer && liveData.soccer.upcoming) || [];
+    if (up.length) {
       liveEl.style.visibility = 'visible';
-      liveEl.textContent = LANG === 'en' ? '○ NEXT' : '○ PRÓXIMO';
-      setLine(nx.split(' x ').map(abbr).join(' x '));
-      metaEl.textContent = fmtKickoff(liveData.soccer.next_at)
-                        || (LANG === 'en' ? 'next match' : 'próximo jogo');
+      cycleIdx = 0;
+      const show = () => {
+        const g = up[cycleIdx % up.length]; cycleIdx++;
+        boardEl.parentElement.classList.toggle('finale', !!g.final);
+        liveEl.classList.toggle('goldbadge', !!g.final);
+        liveEl.textContent = g.final
+          ? (LANG === 'en' ? '★ GRAND FINAL' : '★ GRANDE FINAL')
+          : (LANG === 'en' ? '○ NEXT' : '○ PRÓXIMO');
+        setLine(g.label.split(' x ').map(abbr).join(' x '));
+        metaEl.textContent = fmtKickoff(g.at)
+                          || (LANG === 'en' ? 'next match' : 'próximo jogo');
+      };
+      show();
+      if (up.length > 1) cycleTimer = setInterval(show, 5200);
     } else {                              // feed has nothing scheduled
       liveEl.style.visibility = 'hidden';
+      boardEl.parentElement.classList.remove('finale');
       setLine(LANG === 'en' ? 'SOON' : 'EM BREVE');
       metaEl.textContent = LANG === 'en' ? 'new games soon' : 'novos jogos em breve';
     }

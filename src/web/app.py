@@ -375,6 +375,8 @@ SPORTS_TABS = [
 # board phase caption (no "ao vivo" here — the board already has a LIVE badge)
 BOARD_PHASE = {"h1": "1º tempo", "ht": "intervalo", "h2": "2º tempo",
                "et1": "prorrogação", "et2": "prorrogação", "pe": "pênaltis"}
+# ESP x ARG 19/07 — the landing board dresses this one up as the grand final
+FINAL_FIXTURE_ID = 18_257_739
 
 
 async def _live_payload() -> dict:
@@ -412,15 +414,22 @@ async def _live_payload() -> dict:
             "hs": hs, "as": aw,
             "phase": BOARD_PHASE.get(phase_code, "em jogo"), "odds": odds,
         })
-    nxt = None
-    nxt_at = None
+    upcoming = []
     if not live:
-        upcoming = [f for f in await _fixtures() if (f.get("StartTime") or 0) / 1000 > now]
-        if upcoming:
-            nf = min(upcoming, key=lambda f: f.get("StartTime") or 0)
-            nxt = f"{pt(nf.get('Participant1', '?'))} x {pt(nf.get('Participant2', '?'))}"
-            nxt_at = nf.get("StartTime")  # ms epoch, board renders local kickoff time
-    payload = {"sports": SPORTS_TABS, "soccer": {"live": live, "next": nxt, "next_at": nxt_at}}
+        future = sorted((f for f in await _fixtures()
+                         if (f.get("StartTime") or 0) / 1000 > now),
+                        key=lambda f: f.get("StartTime") or 0)
+        upcoming = [
+            {"label": f"{pt(f.get('Participant1', '?'))} x {pt(f.get('Participant2', '?'))}",
+             "at": f.get("StartTime"),
+             "final": f.get("FixtureId") == FINAL_FIXTURE_ID}
+            for f in future[:2]
+        ]
+    payload = {"sports": SPORTS_TABS,
+               "soccer": {"live": live, "upcoming": upcoming,
+                          # kept for anything still reading the old shape
+                          "next": upcoming[0]["label"] if upcoming else None,
+                          "next_at": upcoming[0]["at"] if upcoming else None}}
     _live_cache = (time.time(), payload)
     return payload
 
