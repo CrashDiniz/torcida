@@ -213,6 +213,35 @@
   .feature { border-left: 4px solid var(--gold); padding: 4px 0 4px 16px; }
   .feature h3 { font-size: 19px; }
   .feature p { color: #5A5343; font-size: 16.5px; margin-top: 4px; }
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .plan {
+    background: #FBF6EA; border: 1px solid #D8CDB4; border-radius: 8px;
+    padding: 24px 22px; position: relative; box-shadow: 2px 3px 0 rgba(38,34,26,.12);
+    display: flex; flex-direction: column;
+  }
+  .plan.pro { border: 2px solid var(--gold); }
+  .plan h3 { font-family: 'Graduate', serif; font-size: 21px; letter-spacing: 1px; }
+  .plan .who { color: #6E6552; font-size: 14px; margin: 2px 0 14px; font-style: italic; }
+  .plan ul { list-style: none; margin: 0 0 18px; padding: 0; flex: 1; }
+  .plan li { color: #5A5343; font-size: 16px; padding: 5px 0 5px 26px; position: relative; }
+  .plan li::before { content: "✓"; position: absolute; left: 2px; color: var(--green);
+                     font-weight: bold; }
+  .plan.pro li::before { color: var(--gold); }
+  .plan .price { font-family: 'Graduate', serif; color: var(--green); font-size: 15px;
+                 letter-spacing: 1px; }
+  .plan .soon {
+    position: absolute; top: -13px; right: 14px; background: var(--stamp); color: var(--paper);
+    font-family: 'Graduate', serif; font-size: 11px; letter-spacing: 2px;
+    padding: 4px 12px 5px; border-radius: 4px; transform: rotate(2deg);
+    box-shadow: inset 0 -2px 0 rgba(0,0,0,.3);
+  }
+  .plan .cta {
+    margin-top: 14px; display: inline-block; text-align: center; text-decoration: none;
+    background: var(--stamp); color: var(--paper); border-radius: 6px;
+    padding: 10px 16px 12px; font-family: 'Graduate', serif; font-size: 13px;
+    letter-spacing: 1.5px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.3);
+  }
+  .plan .cta:hover { transform: translateY(-1px); }
   .honest {
     background: var(--green); color: var(--paper); border-radius: 10px;
     padding: 34px 30px; text-align: center;
@@ -356,6 +385,39 @@
     Nosso feed de dados (TxODDS) cobre <b>30+ esportes</b> — o placar do
     Torcida já nasce sabendo ler futebol, basquete e futebol americano.
     A lista só cresce. 📟</p>
+</section>
+
+<section id="planos">
+  <h2 class="sec" data-en="Plans">Planos</h2>
+  <div class="plans">
+    <div class="plan">
+      <h3 data-en="Free">Grátis</h3>
+      <p class="who" data-en="for every group, forever">pra todo grupo, pra sempre</p>
+      <ul>
+        <li data-en="Full pool with real consensus odds">Bolão completo com odds reais de consenso</li>
+        <li data-en="AI narrator shouting goals (house voice)">Narrador AI gritando gol (voz da casa)</li>
+        <li data-en="Secret picks + app inside Telegram">Palpite secreto + app dentro do Telegram</li>
+        <li data-en="Leaderboard, underdog glory and endless banter">Leaderboard, glória da zebra e zoeira sem limite</li>
+      </ul>
+      <div class="price" data-en="$0 — no card, no signup">R$0 — sem cartão, sem cadastro</div>
+      <a class="cta display" href="https://t.me/torcidaapp_bot"
+         data-en="Start your pool">Cria teu bolão</a>
+    </div>
+    <div class="plan pro">
+      <div class="soon display" data-en="SOON">EM BREVE</div>
+      <h3>Torcida Pro</h3>
+      <p class="who" data-en="the host subscribes, the whole group levels up">o dono do grupo assina, a resenha toda aproveita</p>
+      <ul>
+        <li data-en="Voice library + two-narrator booth (play-by-play & banter)">Banco de vozes + dupla de narradores (jogo e zoeira)</li>
+        <li data-en="Unlimited pools, custom rules and seasons">Bolões ilimitados, regras custom e temporadas</li>
+        <li data-en="Group page with stats and season memory">Página do grupo com stats e memória da temporada</li>
+        <li data-en="No Torcida branding on announcements">Sem marca do Torcida nos anúncios</li>
+      </ul>
+      <div class="price" data-en="Tournament pass (pay once) or monthly — your call">Passe do torneio (paga 1x) ou mensal — você escolhe</div>
+      <a class="cta display" href="https://t.me/torcidaapp_bot"
+         data-en="Get early access">Quero acesso antecipado</a>
+    </div>
+  </div>
 </section>
 
 <section>
