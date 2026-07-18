@@ -140,7 +140,11 @@ async def _llm_spice(line: str) -> str:
                        "estilo resenha de bar. Reescreva a frase pra soar NATURAL "
                        "FALADA (vira áudio), mantendo os NOMES exatos, o resultado "
                        "correto e os números de odds quando houver (ex: 'de 4.0 pra "
-                       "1.5' — pode falar 'de quatro pra um e meio'). Ao dizer o "
+                       "1.5' — pode falar 'de quatro pra um e meio'). REGRA DE OURO: "
+                       "NUNCA troque os papéis das pessoas — quem a frase diz que "
+                       "cravou/acertou/segurou a odd continua sendo ESSA pessoa, e "
+                       "quem apostou contra continua contra; na dúvida, repita a "
+                       "frase original sem mudar os fatos. Ao dizer o "
                        "placar, use a forma falada do português "
                        "— ex: '2 para a Argentina e 1 para a Inglaterra' ou 'a "
                        "Argentina marca o segundo' — NUNCA '2 a 1' seco nem 'x'. "
@@ -150,7 +154,7 @@ async def _llm_spice(line: str) -> str:
                        "ganhando. 1 a 2 frases curtas, com energia, sem emojis, sem "
                        "asteriscos, sem markdown."},
                       {"role": "user", "content": line}],
-            max_tokens=140, temperature=1.0), timeout=10)
+            max_tokens=140, temperature=0.8), timeout=10)
         text = (resp.choices[0].message.content or "").strip()
         return text or line
     except Exception:
@@ -237,7 +241,10 @@ async def narrate(kind: str, label: str, h: int, a: int,
                                 standings=standings, pot=pot))
         if odds_move:
             line = f"{line} {odds_move}"
+        template_line = line
         line = await _llm_spice(line)
+        if line != template_line:  # audit trail: catch LLM role/name swaps
+            log.info("narration %s template=%r spiced=%r", kind, template_line, line)
         out = Path(tempfile.gettempdir()) / f"torcida_{kind}_{os.getpid()}_{random.randrange(1 << 30)}.ogg"
         return await synth_voice(line, out, kind=kind), _strip_audio_tags(line)
     except Exception:
