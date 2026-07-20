@@ -43,3 +43,36 @@ cp .env.example .env   # fill in tokens
 ```bash
 .venv/bin/pytest
 ```
+
+## TxLINE mainnet setup notes (what actually worked)
+
+We run live on mainnet (`https://txline.txodds.com`) after starting on devnet.
+Notes for anyone hitting trouble with the mainnet API:
+
+1. **The auth flow is identical to devnet, but tokens are per-network.** A
+   devnet `txoracle_api_...` token does NOT work against the mainnet base URL.
+   Redo the full flow against mainnet: `POST /auth/guest/start` (guest JWT) →
+   on-chain `Subscribe` instruction signed by your wallet on **mainnet-beta**
+   (needs a little real SOL for the fee) → `POST /api/token/activate` with the
+   signed activation message + the subscribe tx signature.
+2. **Every data call needs BOTH headers** — `Authorization: Bearer <guest JWT>`
+   *and* `X-Api-Token: <txoracle token>`. Missing either one looks like an
+   auth problem with the token when it isn't.
+3. **Guest JWTs expire; the api token doesn't.** If calls suddenly 401, refresh
+   the JWT via `/auth/guest/start` and keep the same `X-Api-Token`.
+4. **Mainnet free tier (SL1) is ~60s delayed**; devnet is real-time. During
+   live matches we ran a hybrid: devnet feed for the live experience, mainnet
+   for the on-chain subscription + `validateStatV2` settlement proofs. After
+   the tournament we flipped the live feed to mainnet with
+   [`deploy/flip_mainnet.sh`](deploy/flip_mainnet.sh) (idempotent, with
+   sanity-check and rollback).
+5. **FixtureIds are identical on devnet and mainnet**, so a flip is just
+   swapping `TXLINE_API_BASE` + token — no data migration, no orphaned picks.
+6. **Sending `validateStatV2` proofs on mainnet: expect confirm timeouts.**
+   Under congestion the 30s confirmation window expires while the tx never
+   lands (blockhash expiry). Just retry the send — ours landed on attempt 2.
+   See [`onchain/verify_result.js`](onchain/verify_result.js).
+7. **Knockout-stage gotcha for settlement logic**: the feed emits
+   `fulltime_finalised` at the end of the regular 90 minutes even when the
+   match goes to extra time. Only `game_finalised` is the authoritative end of
+   a knockout match — we learned this live, during the World Cup final.
